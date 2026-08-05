@@ -1,6 +1,8 @@
 <!doctype html>
-<!-- The always-on-top capsule: a tiny transparent window driven by the same Rust "state" /
-     "result" / "error" events as the dashboard. No logic of its own - pure status mirror. -->
+<!-- The permanent capsule: an always-visible, click-through equalizer. No text - state is
+     color and motion. Idle: dim breathing bars. Recording: bars driven by the REAL mic
+     level ("level" events, ~30Hz from Rust). Transcribing/translating: traveling wave in
+     amber/cyan. Paste: green flash. Error: red flash. -->
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8" />
@@ -15,72 +17,113 @@
   }
   #capsule {
     box-sizing: border-box;
-    height: 44px;
+    width: 148px;
+    height: 34px;
+    margin: 1px auto;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 0 16px;
-    border-radius: 22px;
-    background: rgba(18, 18, 20, 0.82);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    backdrop-filter: blur(20px) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-    font: 500 13px/1 -apple-system, "SF Pro Text", sans-serif;
-    color: #f2f2f7;
-    direction: rtl;
+    justify-content: center;
+    gap: 3px;
+    border-radius: 17px;
+    background: rgba(16, 16, 18, 0.78);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    backdrop-filter: blur(18px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
   }
-  #dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex: none;
+  .bar {
+    width: 3px;
+    height: 18px;
+    border-radius: 1.5px;
     background: #8e8e93;
-  }
-  #dot[data-state="recording"] {
-    background: #ff453a;
-    animation: pulse 1.1s ease-in-out infinite;
-  }
-  #dot[data-state="transcribing"] { background: #ffd60a; animation: pulse 0.7s ease-in-out infinite; }
-  #dot[data-state="translating"]  { background: #64d2ff; animation: pulse 0.7s ease-in-out infinite; }
-  #dot[data-state="done"]         { background: #30d158; }
-  #dot[data-state="error"]        { background: #ff453a; }
-  @keyframes pulse {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50%      { transform: scale(1.35); opacity: 0.55; }
-  }
-  #text {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 240px;
+    transform: scaleY(0.12);
+    transform-origin: center;
+    will-change: transform;
   }
 </style>
 </head>
 <body>
-  <div id="capsule"><span id="dot"></span><span id="text">מוכן</span></div>
+  <div id="capsule"></div>
   <script>
     const { listen } = window.__TAURI__.event;
-    const dot = document.getElementById("dot");
-    const text = document.getElementById("text");
-    const STATE_TEXT = {
-      recording: "מקליט…",
-      transcribing: "מתמלל…",
-      translating: "מתרגם…",
-      error: "שגיאה",
+    const capsule = document.getElementById("capsule");
+
+    const N = 17;
+    const bars = Array.from({ length: N }, () => {
+      const b = document.createElement("div");
+      b.className = "bar";
+      capsule.appendChild(b);
+      return b;
+    });
+
+    const COLORS = {
+      idle: "#8e8e93",
+      recording: "#ff453a",
+      transcribing: "#ffd60a",
+      translating: "#64d2ff",
+      done: "#30d158",
+      error: "#ff453a",
     };
-    function set(state, label) {
-      dot.dataset.state = state;
-      text.textContent = label;
+
+    let mode = "idle";
+    let level = 0;          // latest real mic RMS from Rust
+    let flashUntil = 0;     // done/error flash deadline
+    const amp = new Array(N).fill(0.12);
+    const jitter = Array.from({ length: N }, () => 0.6 + Math.random() * 0.8);
+
+    function setColor(c) {
+      for (const b of bars) b.style.background = c;
     }
+
     listen("state", (e) => {
       const s = e.payload;
-      if (s === "idle") return; // Rust hides the pill; keep the last flash visible until then.
-      set(s, STATE_TEXT[s] || "");
+      if (s === "idle") {
+        // Let an active done/error flash finish before dimming.
+        if (Date.now() >= flashUntil) mode = "idle";
+        else setTimeout(() => { if (Date.now() >= flashUntil - 20) mode = "idle"; }, flashUntil - Date.now());
+        return;
+      }
+      mode = s;
+      setColor(COLORS[s] || COLORS.idle);
     });
-    // Flash what was pasted (green) just before Rust hides the pill.
-    listen("result", (e) => set("done", e.payload.english));
-    listen("error", (e) => set("error", e.payload));
+    listen("level", (e) => { level = e.payload; });
+    listen("result", () => {
+      mode = "done";
+      flashUntil = Date.now() + 1200;
+      setColor(COLORS.done);
+    });
+    listen("error", () => {
+      mode = "error";
+      flashUntil = Date.now() + 1600;
+      setColor(COLORS.error);
+    });
+
+    let t = 0;
+    function frame() {
+      t += 0.055;
+      for (let i = 0; i < N; i++) {
+        let target;
+        if (mode === "recording") {
+          // Real amplitude, per-bar jitter so it dances instead of moving as a block.
+          const v = Math.min(1, level * 9);
+          target = 0.1 + v * jitter[i] * (0.55 + 0.45 * Math.sin(t * 3 + i * 1.7));
+        } else if (mode === "transcribing" || mode === "translating") {
+          // Indeterminate traveling wave: work is happening, nothing to measure.
+          target = 0.18 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin(t * 2.4 - i * 0.55), 2);
+        } else if (mode === "done" || mode === "error") {
+          target = 0.65 + 0.2 * Math.sin(t * 1.2 + i * 0.4);
+          if (Date.now() >= flashUntil) { mode = "idle"; setColor(COLORS.idle); }
+        } else {
+          // Idle: barely-alive breathing so the capsule reads as "on" without shouting.
+          target = 0.1 + 0.05 * (0.5 + 0.5 * Math.sin(t * 0.8 + i * 0.35));
+        }
+        amp[i] += (target - amp[i]) * 0.35;
+        bars[i].style.transform = `scaleY(${Math.max(0.06, Math.min(1, amp[i]))})`;
+      }
+      requestAnimationFrame(frame);
+    }
+    setColor(COLORS.idle);
+    requestAnimationFrame(frame);
   </script>
 </body>
 </html>

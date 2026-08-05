@@ -14,7 +14,7 @@ mod translate;
 mod whisper;
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,11 +28,20 @@ use whisper::WhisperEngine;
 
 const DEFAULT_MODEL: &str = "hf.co/dicta-il/DictaLM-3.0-Nemotron-12B-Instruct-GGUF:Q6_K";
 const DEFAULT_HOTKEY: &str = "cmd_r";
-/// Biases whisper decoding toward Orel's speech domain: Hebrew dev-speak with English tech
-/// terms kept in Latin script. Override with ORELLIUS_STT_PROMPT (empty string disables).
-const DEFAULT_WHISPER_PROMPT: &str = "שיחה טכנית על פיתוח תוכנה. מונחים טכניים נשארים באנגלית: \
-commit, push, branch, merge, repo, terminal, build, deploy, test, debug, Rust, TypeScript, \
-Tauri, bun, קובץ, פונקציה, שרת, תיקייה.";
+/// The Hebrew "pre-warm": an extensive initial prompt biasing whisper toward Orel's actual
+/// speech register - everyday Hebrew dev-speak with English tech terms in Latin script.
+/// Whisper conditions on STYLE, so this is written as natural example speech, not a word
+/// list. Budget: whisper reads at most ~224 tokens of initial prompt - this sits under it.
+/// Override with ORELLIUS_STT_PROMPT (empty string disables).
+const DEFAULT_WHISPER_PROMPT: &str = "הכתבה קולית של מפתח תוכנה ישראלי. עברית יומיומית, \
+מונחים טכניים נשארים באנגלית: commit, push, pull request, branch, merge, rebase, repo, \
+clone, terminal, build, deploy, debug, test, refactor, review, function, variable, struct, \
+string, array, endpoint, API, database, server, client, frontend, backend, framework, \
+Rust, TypeScript, JavaScript, Python, Swift, Tauri, React, Next, bun, npm, cargo, git, \
+GitHub, Docker, Linux, macOS, Xcode, Ollama, whisper, Claude. לדוגמה: תעשה commit לשינויים \
+ותדחוף ל-branch הראשי. תריץ את ה-build מחדש ותבדוק שה-test עובר. תפתח את הקובץ main.rs \
+ותוסיף שם function שמקבלת string ומחזירה Result. תבדוק למה ה-server מחזיר שגיאה על ה-endpoint \
+של ה-API. תעשה rebase על main ותפתור את הקונפליקטים.";
 const MIN_SAMPLES: usize = 1600; // ~0.1s at 16k; shorter is a fat-finger, not speech.
 const RMS_FLOOR: f32 = 0.012; // below this the clip is silence/room noise.
 const HISTORY_CAP: usize = 30;
@@ -134,48 +143,27 @@ fn set_tray(app: &AppHandle, s: TrayState) {
         TrayState::Error => "error",
     };
     let _ = app.emit("state", state_str);
-    update_pill(app, s);
 }
 
 fn emit_error(app: &AppHandle, msg: &str) {
     let _ = app.emit("error", msg.to_string());
 }
 
-/// Guards delayed pill-hides: each state change bumps the epoch, and a scheduled hide
-/// only fires if no newer state arrived while it slept (so a new recording keeps the pill up).
-static PILL_EPOCH: AtomicU64 = AtomicU64::new(0);
-
-/// How long the pill lingers after the pipeline finishes, so the green result flash
-/// (or the error) is actually readable before the window vanishes.
-const PILL_LINGER_MS: u64 = 1400;
-const PILL_ERROR_LINGER_MS: u64 = 2600;
-
-/// Show the capsule top-center of the primary screen while the pipeline runs; hide it
-/// (with a linger for the result/error flash) when it returns to idle. The window is
-/// focusable:false, so showing it never steals key focus from the paste target.
-fn update_pill(app: &AppHandle, s: TrayState) {
-    let epoch = PILL_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+/// The pill is ALWAYS visible (Orel's order, 2026-08-06): shown once at startup,
+/// click-through, never hidden. State changes reach it via the same "state"/"level"
+/// events the dashboard uses; it renders an equalizer, not text.
+fn show_pill(app: &AppHandle) {
     let Some(pill) = app.get_webview_window("pill") else {
+        eprintln!("[pill] window 'pill' not found");
         return;
     };
-    match s {
-        TrayState::Recording | TrayState::Transcribing | TrayState::Translating => {
-            position_pill(&pill);
-            let _ = pill.show();
-        }
-        TrayState::Idle | TrayState::Error => {
-            let linger = if matches!(s, TrayState::Error) {
-                PILL_ERROR_LINGER_MS
-            } else {
-                PILL_LINGER_MS
-            };
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(linger));
-                if PILL_EPOCH.load(Ordering::SeqCst) == epoch {
-                    let _ = pill.hide();
-                }
-            });
-        }
+    position_pill(&pill);
+    // Click-through: an always-on overlay must never eat a click meant for the app below.
+    if let Err(e) = pill.set_ignore_cursor_events(true) {
+        eprintln!("[pill] ignore-cursor failed: {e}");
+    }
+    if let Err(e) = pill.show() {
+        eprintln!("[pill] show failed: {e}");
     }
 }
 
@@ -191,7 +179,7 @@ fn position_pill(pill: &tauri::WebviewWindow) {
     let width = pill
         .outer_size()
         .map(|s| s.to_logical::<f64>(scale).width)
-        .unwrap_or(300.0);
+        .unwrap_or(150.0);
     let x = origin.x + (screen.width - width) / 2.0;
     let y = origin.y + 64.0;
     let _ = pill.set_position(tauri::LogicalPosition::new(x, y));
@@ -206,6 +194,17 @@ fn on_press(app: &AppHandle, st: &Arc<AppState>) {
     }
     st.audio.start();
     set_tray(app, TrayState::Recording);
+
+    // Feed the pill's equalizer: ~30Hz live mic level for as long as the hold lasts.
+    let app = app.clone();
+    let st = st.clone();
+    std::thread::spawn(move || {
+        while st.recording.load(Ordering::SeqCst) {
+            let _ = app.emit("level", st.audio.level());
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+        let _ = app.emit("level", 0.0f32);
+    });
 }
 
 fn on_release(app: &AppHandle, st: &Arc<AppState>) {
@@ -414,11 +413,27 @@ pub fn run() {
                 });
             }
 
+            // The pill is permanent: show it once the webview is up.
+            let h = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(800));
+                show_pill(&h);
+            });
+
             // Preload the whisper model so the first push-to-talk isn't a multi-second stall.
             let h = app.handle().clone();
             std::thread::spawn(move || {
                 let ok = whisper_engine().is_ok();
                 let _ = h.emit("model-ready", ok);
+            });
+
+            // Pre-warm DictaLM too: the first Ollama call otherwise pays a ~5s cold model
+            // load exactly when the user is waiting for their first paste.
+            let model = state.ollama_model.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = translate::to_english("בדיקה", &model) {
+                    eprintln!("[warm] dictalm pre-warm failed (first paste will be slow): {e}");
+                }
             });
 
             Ok(())

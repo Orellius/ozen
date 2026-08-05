@@ -72,16 +72,22 @@ impl WhisperEngine {
         if !initial_prompt.is_empty() {
             params.set_initial_prompt(initial_prompt);
         }
-        // Treat each push-to-talk clip as one utterance, and drop whisper's noise behaviors:
-        params.set_single_segment(true);
+        // Drop whisper's noise behaviors, but KEEP the default temperature fallback ladder:
+        // measured 2026-08-06, the "precise" Electron build's whole decode config was whisper
+        // defaults - the ladder retries low-confidence decodes at higher temperatures, and
+        // disabling it (as this port originally did for latency) is a precision loss exactly
+        // on the hard clips. Same reasoning for NOT forcing single_segment.
         params.set_suppress_blank(true);
         params.set_suppress_nst(true); // suppress non-speech tokens (music/noise/timestamp junk)
         params.set_temperature(0.0);
-        params.set_temperature_inc(0.0); // no fallback ladder -> no multi-second retries on hard/long audio
         params.set_no_speech_thold(0.6);
 
+        // Peak-normalize before decode: the raw cpal path has no AGC (the old Electron
+        // pipeline got Chrome's autoGainControl for free), and a quiet mic starves whisper.
+        let samples = normalize_peak(samples);
+
         state
-            .full(params, samples)
+            .full(params, &samples)
             .map_err(|e| format!("whisper inference failed: {e}"))?;
 
         let mut text = String::new();
@@ -99,6 +105,18 @@ impl WhisperEngine {
         }
         Ok(text.trim().to_string())
     }
+}
+
+/// Scale the clip so its peak sits at ~0.95 - a poor man's AGC for the raw cpal path.
+/// The silence guard keeps room noise from being amplified into fake speech; the RMS
+/// floor in lib.rs already rejected silent clips on the RAW samples before this runs.
+fn normalize_peak(samples: &[f32]) -> Vec<f32> {
+    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    if peak < 1e-3 || peak > 0.90 {
+        return samples.to_vec();
+    }
+    let gain = 0.95 / peak;
+    samples.iter().map(|s| s * gain).collect()
 }
 
 /// Locate the ivrit-ai GGML model. Override with WHISPER_MODEL_PATH; otherwise scan the

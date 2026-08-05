@@ -132,8 +132,10 @@ where
                     let now_pressed = (flags & bit) != 0;
                     let was_pressed = pressed_cb.swap(now_pressed, Ordering::SeqCst);
                     if now_pressed && !was_pressed {
+                        log("press");
                         on_press();
                     } else if !now_pressed && was_pressed {
+                        log("release");
                         on_release();
                     }
                 }
