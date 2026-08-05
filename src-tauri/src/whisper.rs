@@ -1,13 +1,18 @@
-//! whisper.rs: on-device Hebrew speech-to-text via whisper-rs + Metal.
-//! Public surface: WhisperEngine::load() -> Result<Self>, transcribe(&self, samples, lang) -> Result<String>.
+//! whisper.rs: on-device Hebrew speech-to-text via whisper-rs + Metal (flash attention).
+//! Public surface: WhisperEngine::load() -> Result<Self>, transcribe(&self, samples, lang, prompt) -> Result<String>.
 //! Why this file (vs inlining in lib.rs): isolates the whisper.cpp FFI plus the one-time model load so the
 //!   Tauri command layer stays thin and the heavy WhisperContext is created exactly once and reused.
-//! NOT responsible for: audio capture (the webview captures it) or resampling (samples arrive 16k mono f32).
+//! NOT responsible for: audio capture (audio.rs owns the native cpal path) or resampling (samples arrive 16k mono f32).
 //! Test strategy: feed a known 16k clip's f32 samples, assert non-empty trimmed Hebrew text.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+/// Above this per-segment no-speech probability the segment is treated as silence/noise,
+/// killing whisper's stock hallucinations (תודה רבה / כתוביות) at the source instead of
+/// string-matching them after the fact.
+const NO_SPEECH_MAX: f32 = 0.5;
 
 pub struct WhisperEngine {
     ctx: Mutex<WhisperContext>,
@@ -19,9 +24,13 @@ impl WhisperEngine {
         // (we enable neither the `log` nor `tracing` feature) this silences their stderr spam.
         whisper_rs::install_logging_hooks();
         let path = resolve_model_path()?;
+        let mut ctx_params = WhisperContextParameters::default();
+        // Flash attention: faster Metal decode, which is what makes beam search affordable
+        // on push-to-talk latency. Incompatible with DTW token timestamps (unused here).
+        ctx_params.flash_attn(true);
         let ctx = WhisperContext::new_with_params(
             path.to_str().ok_or("model path is not valid UTF-8")?,
-            WhisperContextParameters::default(),
+            ctx_params,
         )
         .map_err(|e| format!("whisper model load failed: {e}"))?;
         Ok(Self {
@@ -29,7 +38,12 @@ impl WhisperEngine {
         })
     }
 
-    pub fn transcribe(&self, samples: &[f32], language: &str) -> Result<String, String> {
+    pub fn transcribe(
+        &self,
+        samples: &[f32],
+        language: &str,
+        initial_prompt: &str,
+    ) -> Result<String, String> {
         let ctx = self
             .ctx
             .lock()
@@ -38,7 +52,12 @@ impl WhisperEngine {
             .create_state()
             .map_err(|e| format!("whisper state create failed: {e}"))?;
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        // Beam search over greedy: the standard accuracy bump for Hebrew, affordable on
+        // short push-to-talk clips with flash attention on.
+        let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+            beam_size: 5,
+            patience: -1.0,
+        });
         params.set_language(Some(language));
         let n_threads = std::thread::available_parallelism()
             .map(|n| n.get().min(8) as i32)
@@ -48,6 +67,11 @@ impl WhisperEngine {
         params.set_print_progress(false);
         params.set_print_special(false);
         params.set_print_timestamps(false);
+        // Bias decoding toward the operator's speech domain (Hebrew dev-speak laced with
+        // English tech terms) - this is where mixed he/en clips otherwise get mangled.
+        if !initial_prompt.is_empty() {
+            params.set_initial_prompt(initial_prompt);
+        }
         // Treat each push-to-talk clip as one utterance, and drop whisper's noise behaviors:
         params.set_single_segment(true);
         params.set_suppress_blank(true);
@@ -60,15 +84,18 @@ impl WhisperEngine {
             .full(params, samples)
             .map_err(|e| format!("whisper inference failed: {e}"))?;
 
-        let num_segments = state
-            .full_n_segments()
-            .map_err(|e| format!("segment count failed: {e}"))?;
         let mut text = String::new();
-        for i in 0..num_segments {
-            let segment = state
-                .full_get_segment_text(i)
+        for i in 0..state.full_n_segments() {
+            let Some(segment) = state.get_segment(i) else {
+                continue;
+            };
+            if segment.no_speech_probability() > NO_SPEECH_MAX {
+                continue; // silence/noise segment - whisper would hallucinate here
+            }
+            let piece = segment
+                .to_str_lossy()
                 .map_err(|e| format!("segment {i} read failed: {e}"))?;
-            text.push_str(&segment);
+            text.push_str(&piece);
         }
         Ok(text.trim().to_string())
     }

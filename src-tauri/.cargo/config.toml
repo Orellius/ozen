@@ -1,0 +1,16 @@
+# ggml-metal (whisper-rs 0.16 / whisper.cpp) uses @available(macOS 13,*) checks; with a lower
+# deployment target clang emits __isPlatformVersionAtLeast, which rustc's link (compiler_builtins)
+# does not provide -> "Undefined symbols: ___isPlatformVersionAtLeast". Target 13.0 makes the
+# checks compile-time constants. Keep tauri.conf.json minimumSystemVersion in sync.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "13.0"
+
+# Belt-and-suspenders for the same class: any @available check ABOVE the deployment target
+# still emits the call, so link Apple's compiler-rt (verified to contain the symbol,
+# 2026-08-05). Path rots on Xcode/clang major bumps - refresh with:
+#   echo "$(clang -print-resource-dir)/lib/darwin/libclang_rt.osx.a"
+[target.aarch64-apple-darwin]
+rustflags = [
+  "-C",
+  "link-arg=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/21/lib/darwin/libclang_rt.osx.a",
+]

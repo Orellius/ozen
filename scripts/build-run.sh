@@ -4,7 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP="src-tauri/target/release/bundle/macos/Orellius STT.app"
+# studio-cache (2026-07-29) redirects all cargo output; resolve the real target dir.
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps --manifest-path src-tauri/Cargo.toml | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+APP="$TARGET_DIR/release/bundle/macos/Orellius STT.app"
 
 cargo tauri build
 

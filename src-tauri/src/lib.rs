@@ -28,6 +28,11 @@ use whisper::WhisperEngine;
 
 const DEFAULT_MODEL: &str = "hf.co/dicta-il/DictaLM-3.0-Nemotron-12B-Instruct-GGUF:Q6_K";
 const DEFAULT_HOTKEY: &str = "cmd_r";
+/// Biases whisper decoding toward Orel's speech domain: Hebrew dev-speak with English tech
+/// terms kept in Latin script. Override with ORELLIUS_STT_PROMPT (empty string disables).
+const DEFAULT_WHISPER_PROMPT: &str = "שיחה טכנית על פיתוח תוכנה. מונחים טכניים נשארים באנגלית: \
+commit, push, branch, merge, repo, terminal, build, deploy, test, debug, Rust, TypeScript, \
+Tauri, bun, קובץ, פונקציה, שרת, תיקייה.";
 const MIN_SAMPLES: usize = 1600; // ~0.1s at 16k; shorter is a fat-finger, not speech.
 const RMS_FLOOR: f32 = 0.012; // below this the clip is silence/room noise.
 const HISTORY_CAP: usize = 30;
@@ -50,8 +55,10 @@ struct AppState {
     recording: AtomicBool,
     processing: AtomicBool,
     translate_enabled: AtomicBool,
+    polish_enabled: AtomicBool,
     ollama_model: String,
     hotkey: String,
+    whisper_prompt: String,
     history: Mutex<VecDeque<Entry>>,
 }
 
@@ -174,7 +181,7 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
 
     set_tray(&app, TrayState::Transcribing);
     let hebrew = match whisper_engine() {
-        Ok(engine) => match engine.transcribe(&samples, "he") {
+        Ok(engine) => match engine.transcribe(&samples, "he", &st.whisper_prompt) {
             Ok(t) => t,
             Err(e) => {
                 emit_error(&app, &format!("תמלול נכשל: {e}"));
@@ -197,14 +204,21 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         return;
     }
 
-    let english = if st.translate_enabled.load(Ordering::SeqCst) {
+    let translate_on = st.translate_enabled.load(Ordering::SeqCst);
+    let english = if translate_on || st.polish_enabled.load(Ordering::SeqCst) {
         set_tray(&app, TrayState::Translating);
-        match translate::to_english(&hebrew, &st.ollama_model) {
+        let result = if translate_on {
+            translate::to_english(&hebrew, &st.ollama_model)
+        } else {
+            // Hebrew-out mode: same model cleans the transcript instead of translating it.
+            translate::polish_hebrew(&hebrew, &st.ollama_model)
+        };
+        match result {
             Ok(t) if !t.is_empty() => t,
             Ok(_) => hebrew.clone(),
             Err(e) => {
-                // Don't strand the user: fall back to pasting the Hebrew, but tell them translate failed.
-                emit_error(&app, &format!("תרגום נכשל (הודבק עברית): {e}"));
+                // Don't strand the user: fall back to pasting the raw Hebrew, but tell them why.
+                emit_error(&app, &format!("עיבוד נכשל (הודבק עברית גולמית): {e}"));
                 hebrew.clone()
             }
         }
@@ -279,14 +293,21 @@ fn show_dashboard(app: &AppHandle) {
 pub fn run() {
     let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let hk = std::env::var("ORELLIUS_STT_HOTKEY").unwrap_or_else(|_| DEFAULT_HOTKEY.to_string());
+    let prompt = std::env::var("ORELLIUS_STT_PROMPT")
+        .unwrap_or_else(|_| DEFAULT_WHISPER_PROMPT.to_string());
 
     let state = Arc::new(AppState {
         audio: AudioHandle::spawn(),
         recording: AtomicBool::new(false),
         processing: AtomicBool::new(false),
         translate_enabled: AtomicBool::new(true),
+        // Hebrew-out polish (DictaLM cleanup when translate is off). ORELLIUS_STT_POLISH=0 disables.
+        polish_enabled: AtomicBool::new(
+            std::env::var("ORELLIUS_STT_POLISH").map_or(true, |v| v != "0"),
+        ),
         ollama_model: model,
         hotkey: hk,
+        whisper_prompt: prompt,
         history: Mutex::new(VecDeque::new()),
     });
 
