@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Capability for the dashboard and pill windows",
   "windows": ["main", "pill"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

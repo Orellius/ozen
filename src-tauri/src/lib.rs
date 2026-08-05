@@ -153,11 +153,29 @@ fn emit_error(app: &AppHandle, msg: &str) {
 /// click-through, never hidden. State changes reach it via the same "state"/"level"
 /// events the dashboard uses; it renders an equalizer, not text.
 fn show_pill(app: &AppHandle) {
+    // apply_vibrancy is main-thread-only (caught live 2026-08-06); dispatch the whole thing.
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || show_pill_on_main(&app));
+}
+
+fn show_pill_on_main(app: &AppHandle) {
     let Some(pill) = app.get_webview_window("pill") else {
         eprintln!("[pill] window 'pill' not found");
         return;
     };
     position_pill(&pill);
+    // The Dock-style glass: a real NSVisualEffectView clipped to a circle (radius = half
+    // the 72px window). CSS backdrop-filter on a transparent Tauri window paints a square
+    // halo - measured 2026-08-06 - so the material lives at the window layer instead.
+    #[cfg(target_os = "macos")]
+    if let Err(e) = window_vibrancy::apply_vibrancy(
+        &pill,
+        window_vibrancy::NSVisualEffectMaterial::HudWindow,
+        None,
+        Some(36.0),
+    ) {
+        eprintln!("[pill] vibrancy failed: {e}");
+    }
     // No click-through here on purpose: the orb is DRAGGABLE (mousedown starts a native
     // window drag), which requires receiving mouse events. It stays focusable:false, so
     // it can never become key and the synthetic Cmd+V always reaches the user's app.

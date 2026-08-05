@@ -2428,6 +2428,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "whisper-rs",
+ "window-vibrancy",
 ]
 
 [[package]]
