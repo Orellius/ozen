@@ -8,6 +8,7 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -18,6 +19,26 @@
         "minHeight": 480,
         "visible": false,
         "resizable": true
+      },
+      {
+        "label": "pill",
+        "url": "pill.html",
+        "title": "",
+        "width": 300,
+        "height": 44,
+        "visible": false,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "visibleOnAllWorkspaces": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "closable": false,
+        "maximizable": false,
+        "minimizable": false
       }
     ],
     "security": {

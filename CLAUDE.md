@@ -22,6 +22,10 @@ Tauri whisper core from `~/Archive/_OSS/orellius-voice`, with a NATIVE audio pat
 - `translate.rs` - DictaLM via Ollama `/api/chat`. Prompt is hardened to TRANSLATE, never EXECUTE.
 - `hotkey.rs` - CGEventTap push-to-talk (press+release edges). Needs Accessibility.
 - `paste.rs` - arboard clipboard (save/restore) + CGEvent Cmd+V.
+- `../src/pill.html` - the always-on-top capsule (ported from the Electron Whissper's pill,
+  2026-08-05): transparent, focusable:false (must NEVER steal key focus - the paste targets
+  the focused app), all-workspaces, top-center. Driven by `update_pill` in `lib.rs` off the
+  same state events; needs `macOSPrivateApi: true` for window transparency on macOS.
 
 ## Non-obvious constraints
 

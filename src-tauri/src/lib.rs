@@ -14,7 +14,7 @@ mod translate;
 mod whisper;
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -134,10 +134,67 @@ fn set_tray(app: &AppHandle, s: TrayState) {
         TrayState::Error => "error",
     };
     let _ = app.emit("state", state_str);
+    update_pill(app, s);
 }
 
 fn emit_error(app: &AppHandle, msg: &str) {
     let _ = app.emit("error", msg.to_string());
+}
+
+/// Guards delayed pill-hides: each state change bumps the epoch, and a scheduled hide
+/// only fires if no newer state arrived while it slept (so a new recording keeps the pill up).
+static PILL_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// How long the pill lingers after the pipeline finishes, so the green result flash
+/// (or the error) is actually readable before the window vanishes.
+const PILL_LINGER_MS: u64 = 1400;
+const PILL_ERROR_LINGER_MS: u64 = 2600;
+
+/// Show the capsule top-center of the primary screen while the pipeline runs; hide it
+/// (with a linger for the result/error flash) when it returns to idle. The window is
+/// focusable:false, so showing it never steals key focus from the paste target.
+fn update_pill(app: &AppHandle, s: TrayState) {
+    let epoch = PILL_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+    let Some(pill) = app.get_webview_window("pill") else {
+        return;
+    };
+    match s {
+        TrayState::Recording | TrayState::Transcribing | TrayState::Translating => {
+            position_pill(&pill);
+            let _ = pill.show();
+        }
+        TrayState::Idle | TrayState::Error => {
+            let linger = if matches!(s, TrayState::Error) {
+                PILL_ERROR_LINGER_MS
+            } else {
+                PILL_LINGER_MS
+            };
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(linger));
+                if PILL_EPOCH.load(Ordering::SeqCst) == epoch {
+                    let _ = pill.hide();
+                }
+            });
+        }
+    }
+}
+
+/// Top-center of the primary monitor, in logical coordinates (HiDPI-safe: the faked-Retina
+/// panel reports scale 2.0 and logical positioning respects it).
+fn position_pill(pill: &tauri::WebviewWindow) {
+    let Ok(Some(mon)) = pill.primary_monitor() else {
+        return;
+    };
+    let scale = mon.scale_factor();
+    let screen = mon.size().to_logical::<f64>(scale);
+    let origin = mon.position().to_logical::<f64>(scale);
+    let width = pill
+        .outer_size()
+        .map(|s| s.to_logical::<f64>(scale).width)
+        .unwrap_or(300.0);
+    let x = origin.x + (screen.width - width) / 2.0;
+    let y = origin.y + 64.0;
+    let _ = pill.set_position(tauri::LogicalPosition::new(x, y));
 }
 
 fn on_press(app: &AppHandle, st: &Arc<AppState>) {

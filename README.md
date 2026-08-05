@@ -64,6 +64,10 @@ in `src-tauri/.cargo/config.toml`: ggml's `@available` checks emit
 `MACOSX_DEPLOYMENT_TARGET=13.0` and links Apple's compiler-rt explicitly. Don't delete
 either line, and refresh the compiler-rt path on Xcode major bumps.
 
+While you hold the hotkey, an **always-on-top capsule** floats top-center - pulsing red
+while recording, then מתמלל/מתרגם, then a green flash of what was pasted. It never takes
+focus, so the paste always lands in your app.
+
 The app lives in the menu bar (aleph icon); left-click opens
 the dashboard, right-click for the menu. Hold **Right-⌘**, speak Hebrew, release.
 
