@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Orellius STT</title>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <span class="dot" id="dot"></span>
+        <h1>Orellius STT</h1>
+        <span class="status" id="status">טוען…</span>
+      </header>
+
+      <section class="ptt">
+        <p class="ptt-key">החזק <kbd id="hotkey">⌘ ימני</kbd> ודבר בעברית · שחרר כדי להדביק</p>
+      </section>
+
+      <section class="panel" id="perms" hidden>
+        <p class="perms-msg" id="perms-msg">נדרשות הרשאות.</p>
+        <div class="row">
+          <button class="btn" id="grant-ax">אפשר נגישות</button>
+          <button class="btn" id="grant-mic">אפשר מיקרופון</button>
+        </div>
+      </section>
+
+      <section class="settings">
+        <label class="switch">
+          <input type="checkbox" id="translate" checked />
+          <span>תרגום לאנגלית</span>
+        </label>
+        <div class="models">
+          <span class="model-line">תמלול: <b id="asr">ivrit-ai turbo</b> <em id="asr-state">טוען…</em></span>
+          <span class="model-line">תרגום: <b id="mt">DictaLM 3.0</b></span>
+        </div>
+      </section>
+
+      <section class="history">
+        <h2>היסטוריה</h2>
+        <div class="list" id="list">
+          <p class="empty" id="empty">עוד לא נאמר כלום. החזק את המקש ודבר.</p>
+        </div>
+      </section>
+
+      <div class="toast" id="toast" hidden></div>
+    </main>
+  </body>
+</html>
