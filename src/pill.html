@@ -1,60 +1,75 @@
 <!doctype html>
-<!-- The permanent capsule: an always-visible, click-through equalizer. No text - state is
-     color and motion. Idle: dim breathing bars. Recording: bars driven by the REAL mic
-     level ("level" events, ~30Hz from Rust). Transcribing/translating: traveling wave in
-     amber/cyan. Paste: green flash. Error: red flash. -->
+<!-- The orb: an always-visible round equalizer, draggable anywhere (mousedown = native
+     window drag). No text - state is color and motion. Idle: dim breathing ring.
+     Recording: radial bars driven by the REAL mic level ("level" events, ~30Hz from Rust).
+     Transcribing/translating: spinning wave in amber/cyan. Paste: green flash. Error: red. -->
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8" />
 <style>
   html, body {
     margin: 0;
+    width: 72px;
+    height: 72px;
     background: transparent;
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
-    cursor: default;
+    cursor: grab;
   }
-  #capsule {
-    box-sizing: border-box;
-    width: 148px;
-    height: 34px;
-    margin: 1px auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    border-radius: 17px;
+  #disc {
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
     background: rgba(16, 16, 18, 0.78);
     -webkit-backdrop-filter: blur(18px) saturate(1.4);
     backdrop-filter: blur(18px) saturate(1.4);
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
   }
+  .spoke {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
   .bar {
-    width: 3px;
-    height: 18px;
-    border-radius: 1.5px;
+    position: absolute;
+    left: 50%;
+    top: 14px;
+    width: 2.5px;
+    height: 13px;
+    margin-left: -1.25px;
+    border-radius: 1.25px;
     background: #8e8e93;
-    transform: scaleY(0.12);
+    transform: scaleY(0.18);
     transform-origin: center;
     will-change: transform;
   }
 </style>
 </head>
 <body>
-  <div id="capsule"></div>
+  <div id="disc"></div>
   <script>
     const { listen } = window.__TAURI__.event;
-    const capsule = document.getElementById("capsule");
+    const { getCurrentWindow } = window.__TAURI__.window;
 
-    const N = 17;
-    const bars = Array.from({ length: N }, () => {
-      const b = document.createElement("div");
-      b.className = "bar";
-      capsule.appendChild(b);
-      return b;
+    // Native drag from anywhere on the orb.
+    document.body.addEventListener("mousedown", (e) => {
+      if (e.buttons === 1) getCurrentWindow().startDragging();
     });
+
+    const N = 14;
+    const bars = [];
+    for (let i = 0; i < N; i++) {
+      const spoke = document.createElement("div");
+      spoke.className = "spoke";
+      spoke.style.transform = `rotate(${(360 / N) * i}deg)`;
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      spoke.appendChild(bar);
+      document.body.appendChild(spoke);
+      bars.push(bar);
+    }
 
     const COLORS = {
       idle: "#8e8e93",
@@ -66,9 +81,9 @@
     };
 
     let mode = "idle";
-    let level = 0;          // latest real mic RMS from Rust
-    let flashUntil = 0;     // done/error flash deadline
-    const amp = new Array(N).fill(0.12);
+    let level = 0;
+    let flashUntil = 0;
+    const amp = new Array(N).fill(0.18);
     const jitter = Array.from({ length: N }, () => 0.6 + Math.random() * 0.8);
 
     function setColor(c) {
@@ -78,9 +93,7 @@
     listen("state", (e) => {
       const s = e.payload;
       if (s === "idle") {
-        // Let an active done/error flash finish before dimming.
         if (Date.now() >= flashUntil) mode = "idle";
-        else setTimeout(() => { if (Date.now() >= flashUntil - 20) mode = "idle"; }, flashUntil - Date.now());
         return;
       }
       mode = s;
@@ -104,21 +117,19 @@
       for (let i = 0; i < N; i++) {
         let target;
         if (mode === "recording") {
-          // Real amplitude, per-bar jitter so it dances instead of moving as a block.
           const v = Math.min(1, level * 9);
-          target = 0.1 + v * jitter[i] * (0.55 + 0.45 * Math.sin(t * 3 + i * 1.7));
+          target = 0.15 + v * jitter[i] * (0.55 + 0.45 * Math.sin(t * 3 + i * 1.7));
         } else if (mode === "transcribing" || mode === "translating") {
-          // Indeterminate traveling wave: work is happening, nothing to measure.
-          target = 0.18 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin(t * 2.4 - i * 0.55), 2);
+          // Spinning wave around the ring: work in progress, nothing to measure.
+          target = 0.22 + 0.6 * Math.pow(0.5 + 0.5 * Math.sin(t * 2.6 - (i / N) * Math.PI * 2), 2);
         } else if (mode === "done" || mode === "error") {
-          target = 0.65 + 0.2 * Math.sin(t * 1.2 + i * 0.4);
+          target = 0.7 + 0.2 * Math.sin(t * 1.2 + i * 0.4);
           if (Date.now() >= flashUntil) { mode = "idle"; setColor(COLORS.idle); }
         } else {
-          // Idle: barely-alive breathing so the capsule reads as "on" without shouting.
-          target = 0.1 + 0.05 * (0.5 + 0.5 * Math.sin(t * 0.8 + i * 0.35));
+          target = 0.16 + 0.06 * (0.5 + 0.5 * Math.sin(t * 0.8 + i * 0.45));
         }
         amp[i] += (target - amp[i]) * 0.35;
-        bars[i].style.transform = `scaleY(${Math.max(0.06, Math.min(1, amp[i]))})`;
+        bars[i].style.transform = `scaleY(${Math.max(0.08, Math.min(1, amp[i]))})`;
       }
       requestAnimationFrame(frame);
     }

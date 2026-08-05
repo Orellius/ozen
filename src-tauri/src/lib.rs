@@ -158,10 +158,9 @@ fn show_pill(app: &AppHandle) {
         return;
     };
     position_pill(&pill);
-    // Click-through: an always-on overlay must never eat a click meant for the app below.
-    if let Err(e) = pill.set_ignore_cursor_events(true) {
-        eprintln!("[pill] ignore-cursor failed: {e}");
-    }
+    // No click-through here on purpose: the orb is DRAGGABLE (mousedown starts a native
+    // window drag), which requires receiving mouse events. It stays focusable:false, so
+    // it can never become key and the synthetic Cmd+V always reaches the user's app.
     if let Err(e) = pill.show() {
         eprintln!("[pill] show failed: {e}");
     }
@@ -179,7 +178,7 @@ fn position_pill(pill: &tauri::WebviewWindow) {
     let width = pill
         .outer_size()
         .map(|s| s.to_logical::<f64>(scale).width)
-        .unwrap_or(150.0);
+        .unwrap_or(72.0);
     let x = origin.x + (screen.width - width) / 2.0;
     let y = origin.y + 64.0;
     let _ = pill.set_position(tauri::LogicalPosition::new(x, y));
