@@ -34,13 +34,13 @@ const DEFAULT_HOTKEY: &str = "cmd_r";
 /// list. Budget: whisper reads at most ~224 tokens of initial prompt - this sits under it.
 /// Override with ORELLIUS_STT_PROMPT (empty string disables).
 const DEFAULT_WHISPER_PROMPT: &str = "הכתבה קולית של מפתח תוכנה ישראלי, עברית מדוברת עם \
-סלנג. מונחים טכניים באנגלית: commit, push, pull request, branch, merge, rebase, repo, \
-terminal, build, deploy, debug, test, refactor, function, variable, string, endpoint, API, \
-database, server, frontend, backend, Rust, TypeScript, Python, Tauri, React, bun, cargo, \
-git, GitHub, Docker, macOS, Ollama, Claude. דוגמאות: יאללה, תעשה commit ותדחוף ל-branch. \
-סבבה, ה-build עבר, אחלה. וואלה, ה-test נכשל, חבל על הזמן. נו, תריץ את זה שוב, תכל'ס זה \
-עובד, קדימה. תפתח את main.rs ותוסיף function שמחזירה Result. בוא נבדוק למה ה-server מחזיר \
-שגיאה על ה-endpoint.";
+הרבה סלנג. מונחים טכניים באנגלית: commit, push, branch, merge, rebase, repo, terminal, \
+build, deploy, debug, test, refactor, function, endpoint, API, server, frontend, backend, \
+Rust, TypeScript, Python, Tauri, React, bun, cargo, git, GitHub, Docker, macOS, Ollama, \
+Claude. דוגמאות: יאללה, תעשה commit ותדחוף ל-branch. סבבה אחי, ה-build עבר, מעולה, פצצה. \
+וואלה, ה-test נכשל, על הפנים, חבל על הזמן. רגע, שנייה, תריץ את זה שוב. נו, תכל'ס זה עובד, \
+קדימה, זהו. אין מצב, בוא'נה, אחלה. תפתח את main.rs ותוסיף function שמחזירה Result. בוא \
+נבדוק למה ה-server מחזיר שגיאה על ה-endpoint.";
 const MIN_SAMPLES: usize = 1600; // ~0.1s at 16k; shorter is a fat-finger, not speech.
 const RMS_FLOOR: f32 = 0.012; // below this the clip is silence/room noise.
 const HISTORY_CAP: usize = 30;
