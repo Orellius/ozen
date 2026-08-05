@@ -33,15 +33,14 @@ const DEFAULT_HOTKEY: &str = "cmd_r";
 /// Whisper conditions on STYLE, so this is written as natural example speech, not a word
 /// list. Budget: whisper reads at most ~224 tokens of initial prompt - this sits under it.
 /// Override with ORELLIUS_STT_PROMPT (empty string disables).
-const DEFAULT_WHISPER_PROMPT: &str = "הכתבה קולית של מפתח תוכנה ישראלי. עברית יומיומית, \
-מונחים טכניים נשארים באנגלית: commit, push, pull request, branch, merge, rebase, repo, \
-clone, terminal, build, deploy, debug, test, refactor, review, function, variable, struct, \
-string, array, endpoint, API, database, server, client, frontend, backend, framework, \
-Rust, TypeScript, JavaScript, Python, Swift, Tauri, React, Next, bun, npm, cargo, git, \
-GitHub, Docker, Linux, macOS, Xcode, Ollama, whisper, Claude. לדוגמה: תעשה commit לשינויים \
-ותדחוף ל-branch הראשי. תריץ את ה-build מחדש ותבדוק שה-test עובר. תפתח את הקובץ main.rs \
-ותוסיף שם function שמקבלת string ומחזירה Result. תבדוק למה ה-server מחזיר שגיאה על ה-endpoint \
-של ה-API. תעשה rebase על main ותפתור את הקונפליקטים.";
+const DEFAULT_WHISPER_PROMPT: &str = "הכתבה קולית של מפתח תוכנה ישראלי, עברית מדוברת עם \
+סלנג. מונחים טכניים באנגלית: commit, push, pull request, branch, merge, rebase, repo, \
+terminal, build, deploy, debug, test, refactor, function, variable, string, endpoint, API, \
+database, server, frontend, backend, Rust, TypeScript, Python, Tauri, React, bun, cargo, \
+git, GitHub, Docker, macOS, Ollama, Claude. דוגמאות: יאללה, תעשה commit ותדחוף ל-branch. \
+סבבה, ה-build עבר, אחלה. וואלה, ה-test נכשל, חבל על הזמן. נו, תריץ את זה שוב, תכל'ס זה \
+עובד, קדימה. תפתח את main.rs ותוסיף function שמחזירה Result. בוא נבדוק למה ה-server מחזיר \
+שגיאה על ה-endpoint.";
 const MIN_SAMPLES: usize = 1600; // ~0.1s at 16k; shorter is a fat-finger, not speech.
 const RMS_FLOOR: f32 = 0.012; // below this the clip is silence/room noise.
 const HISTORY_CAP: usize = 30;
