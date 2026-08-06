@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Orellius STT",
-  "version": "0.3.0",
-  "identifier": "ai.orellius.stt",
+  "productName": "Ozen",
+  "version": "0.4.0",
+  "identifier": "ai.orellius.ozen",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -15,7 +15,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Orellius STT",
+        "title": "Ozen",
         "width": 560,
         "height": 760,
         "minWidth": 440,

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 
 # studio-cache (2026-07-29) redirects all cargo output; resolve the real target dir.
 TARGET_DIR="$(cargo metadata --format-version 1 --no-deps --manifest-path src-tauri/Cargo.toml | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
-APP="$TARGET_DIR/release/bundle/macos/Orellius STT.app"
+APP="$TARGET_DIR/release/bundle/macos/Ozen.app"
 
 cargo tauri build
 
@@ -15,6 +15,6 @@ echo "--- signature ---"
 codesign -dv --verbose=2 "$APP" 2>&1 | grep -E "Authority|Identifier|Signature" || true
 
 # Relaunch cleanly.
-pkill -f "Orellius STT.app/Contents/MacOS" 2>/dev/null || true
+pkill -f "Ozen.app/Contents/MacOS" 2>/dev/null || true
 open "$APP"
 echo "launched: $APP"

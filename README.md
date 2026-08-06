@@ -1,10 +1,12 @@
-# orellius-stt (repo: Orellius/whissper)
+# Ozen (אוזן - "ear") · repo `Orellius/ozen`
 
 Tap a key, speak Hebrew, tap again - polished **Hebrew** or coherent **English** lands in
 whatever app is focused (your terminal running Claude Code, an editor, a chat box). A
-menu-bar tool, fully on-device. Revival of the old Electron "Whissper" app, rebuilt on
-Tauri 2 with a native (non-webview) audio path and a 2026 model stack. The repo is named
-`whissper` because `Orellius/orellius-stt` still holds the pre-Tauri June 2026 iteration.
+menu-bar tool, fully on-device. Descendant of the Electron "Whissper" app, rebuilt on Tauri 2
+with a native (non-webview) audio path and a 2026 model stack. Renamed from orellius-stt /
+whissper on 2026-08-06: the product, the repo and the directory all say Ozen now, and GitHub
+redirects the old URLs. `Orellius/orellius-stt` still holds the pre-Tauri June 2026 iteration
+and is unrelated.
 
 ## The loop
 
@@ -66,7 +68,7 @@ cd ~/Desktop/Studio/tools/orellius-stt
 bun install            # first time (tauri CLI)
 bun tauri build        # release .app, signed with "Whissper Local"
 # bundle lands under the studio-cache cargo target dir:
-open "$HOME/.studio-cache/cargo/release/bundle/macos/Orellius STT.app"
+open "$HOME/.studio-cache/cargo/release/bundle/macos/Ozen.app"
 ```
 
 Or `./scripts/build-run.sh` (resolves the real target dir itself). Build trap, documented
@@ -98,13 +100,13 @@ First record loads the whisper model (a few seconds, once). DictaLM's first call
 
 | Var | Default | Purpose |
 |---|---|---|
-| `ORELLIUS_STT_HOTKEY` | `cmd_r` | `cmd_r` / `ctrl` / `f5` / `f6`; overrides the saved setting |
+| `OZEN_HOTKEY` | `cmd_r` | `cmd_r` / `ctrl` / `f5` / `f6`; overrides the saved setting |
 | `OLLAMA_MODEL` | `hf.co/dicta-il/DictaLM-3.0-Nemotron-12B-Instruct-GGUF:Q6_K` | translator + Hebrew polish |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint |
 | `WHISPER_MODEL_PATH` | HF cache auto-resolve | ivrit GGML override |
-| `ORELLIUS_STT_PROMPT` | Hebrew dev-speak bias (see `lib.rs`) | whisper initial prompt; empty disables |
-| `ORELLIUS_STT_POLISH` | `1` | translate-off mode: `1` = DictaLM-polished Hebrew, `0` = raw transcript |
-| `ORELLIUS_STT_DEBUG` | unset | write hotkey log to `/tmp/orellius-stt-hotkey.log` |
+| `OZEN_PROMPT` | Hebrew dev-speak bias (see `lib.rs`) | whisper initial prompt; empty disables |
+| `OZEN_POLISH` | `1` | translate-off mode: `1` = DictaLM-polished Hebrew, `0` = raw transcript |
+| `OZEN_DEBUG` | unset | write hotkey log to `/tmp/ozen-hotkey.log` |
 
 ## Requirements
 
@@ -115,10 +117,10 @@ First record loads the whisper model (a few seconds, once). DictaLM's first call
 ## Hebrew quality (2026-08-05 revival)
 
 - Beam search (size 5) + Metal flash attention (whisper-rs 0.16) instead of greedy decode.
-- Whisper initial prompt biases toward Hebrew dev-speak with Latin tech terms (`ORELLIUS_STT_PROMPT`).
+- Whisper initial prompt biases toward Hebrew dev-speak with Latin tech terms (`OZEN_PROMPT`).
 - Hallucination gate on per-segment no-speech probability, ahead of the phrase blocklist.
 - Translate OFF now pastes **polished Hebrew**: DictaLM fixes ASR errors, adds punctuation,
-  and restores transliterated tech terms (קומיט -> commit). `ORELLIUS_STT_POLISH=0` for raw.
+  and restores transliterated tech terms (קומיט -> commit). `OZEN_POLISH=0` for raw.
 
 ## v0.3.0 - toggle, cues, and the learning dictionary
 
@@ -150,7 +152,7 @@ median ASR and LLM latency - plus a quality block: expansion ratio (English word
 word - a sagging ratio means dropped content), correction rate, and rejections broken down by
 reason (short / silent / no text / ASR / LLM / paste).
 
-Everything persists to `~/Library/Application Support/ai.orellius.stt/`.
+Everything persists to `~/Library/Application Support/ai.orellius.ozen/`.
 
 ## Israeli-accented English
 

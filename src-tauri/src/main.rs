@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    orellius_stt_lib::run()
+    ozen_lib::run()
 }

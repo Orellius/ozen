@@ -109,7 +109,7 @@ export function App() {
     <main className="app">
       <header className="topbar">
         <span className="dot" data-state={state} />
-        <h1>Orellius STT</h1>
+        <h1>Ozen</h1>
         <span className="status">{STATE_TEXT[state]}</span>
       </header>
 

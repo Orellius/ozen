@@ -1,9 +1,10 @@
-# CLAUDE.md - orellius-stt (repo: `Orellius/whissper`, private)
+# CLAUDE.md - Ozen (repo: `Orellius/ozen`, private)
 
 Hebrew speech -> polished Hebrew or coherent English, pasted into the focused app.
 Menu-bar Tauri 2 tool, fully on-device. See `README.md` for the full pipeline; this is
-the agent contract. Repo is `whissper` because `Orellius/orellius-stt` holds the old
-pre-Tauri iteration (2026-06-05) - do not push there.
+the agent contract. Renamed from orellius-stt / whissper on 2026-08-06 (Orel's call): product, repo, directory,
+bundle id and env vars all say Ozen. GitHub redirects the old URL. `Orellius/orellius-stt` is
+the unrelated pre-Tauri June 2026 iteration - do not push there.
 
 ## What it is
 
@@ -39,7 +40,27 @@ Tauri whisper core from `~/Archive/_OSS/orellius-voice`, with a NATIVE audio pat
   all-workspaces, draggable. Needs `macOSPrivateApi: true` for transparency on macOS, and
   `withGlobalTauri: true` because it uses `window.__TAURI__` rather than bundled imports.
 
-## Non-obvious constraints (v0.3.0 additions first)
+## Non-obvious constraints (v0.4.0 rebrand first)
+
+- **The signing identity is STILL `Whissper Local`, on purpose.** TCC keys on bundle id + code
+  signature. v0.4.0 already changes the bundle id (`ai.orellius.stt` -> `ai.orellius.ozen`),
+  which costs exactly one Mic + Accessibility re-grant; rotating the certificate at the same
+  time would have cost a second one for no user-visible gain. It is an invisible keychain
+  label. Rotating it later is a standalone task, and it must be a NEW self-signed cert created
+  before `tauri.conf.json` names it, or the build fails at the signing step.
+- **The app data dir moved with the bundle id** to
+  `~/Library/Application Support/ai.orellius.ozen/`. Anything stored under the old id is
+  orphaned, not migrated.
+- **The login item points at a path that no longer exists** after the rename. It must be
+  re-registered against `/Applications/Ozen.app`.
+- **Icons are GENERATED, not drawn**: `scripts/gen-icons.py` derives the app icon and all five
+  menu-bar frames from the same squircle + blob geometry the live orb uses. Re-run it after
+  changing the palette or the tile radius; do not hand-edit the PNGs.
+- **The menu-bar icon is a live level meter during recording** (`arcs_for_level`), sharing the
+  orb's `min(1, level * 9)` curve so the two indicators can never disagree. It updates at 8Hz
+  and only on a change of arc count.
+
+## Non-obvious constraints (v0.3.0)
 
 - **The pipeline routes on the SCRIPT of the ASR output, not on the requested language.**
   `speech_lang` defaults to `auto`, so a clip may come back English; English gets
@@ -47,7 +68,7 @@ Tauri whisper core from `~/Archive/_OSS/orellius-voice`, with a NATIVE audio pat
   `lib.rs` is the switch - Latin-dominant wins, so one Hebrew word inside an English sentence
   does not flip the route.
 - **The whisper initial prompt is chosen PER LANGUAGE MODE.** A Hebrew-register prompt drags
-  English clips toward Hebrew output, which defeats auto mode entirely. `ORELLIUS_STT_PROMPT`
+  English clips toward Hebrew output, which defeats auto mode entirely. `OZEN_PROMPT`
   still overrides all three (it is `Option<String>` now - unset means "pick by mode", not
   "use the Hebrew one").
 - **The aligner learns ONLY from `mode == "translate"`.** A repair pass is en->en, so feeding
@@ -115,14 +136,14 @@ Tauri whisper core from `~/Archive/_OSS/orellius-voice`, with a NATIVE audio pat
 ## Hebrew quality layer (2026-08-05 revival)
 
 - whisper-rs 0.16, Metal + flash attention, beam search (size 5) instead of greedy.
-- `ORELLIUS_STT_PROMPT` biases decoding toward Hebrew dev-speak with Latin tech terms
+- `OZEN_PROMPT` biases decoding toward Hebrew dev-speak with Latin tech terms
   (default in `lib.rs`); empty string disables.
 - Hallucination gate: per-segment `no_speech_probability() > 0.5` drops the segment
   (`whisper.rs`); the `clean_transcript` blocklist in `lib.rs` stays as backstop.
 - Translate OFF now pastes POLISHED Hebrew via DictaLM (`polish_hebrew` in `translate.rs`:
   punctuation, ASR fixes, transliterated tech terms restored to Latin script). Same
   never-execute hardening as translation - do not loosen either prompt.
-  `ORELLIUS_STT_POLISH=0` restores raw-Hebrew passthrough.
+  `OZEN_POLISH=0` restores raw-Hebrew passthrough.
 
 ## Verify
 

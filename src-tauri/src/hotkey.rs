@@ -230,13 +230,13 @@ fn now_ms() -> u64 {
 }
 
 fn log(msg: &str) {
-    if std::env::var("ORELLIUS_STT_DEBUG").is_err() {
+    if std::env::var("OZEN_DEBUG").is_err() {
         return;
     }
     if let Ok(mut f) = OpenOptions::new()
         .append(true)
         .create(true)
-        .open("/tmp/orellius-stt-hotkey.log")
+        .open("/tmp/ozen-hotkey.log")
     {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)

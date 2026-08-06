@@ -37,7 +37,7 @@ const DEFAULT_MODEL: &str = "hf.co/dicta-il/DictaLM-3.0-Nemotron-12B-Instruct-GG
 /// speech register - everyday Hebrew dev-speak with English tech terms in Latin script.
 /// Whisper conditions on STYLE, so this is written as natural example speech, not a word
 /// list. Budget: whisper reads at most ~224 tokens of initial prompt - this sits under it.
-/// Override with ORELLIUS_STT_PROMPT (empty string disables).
+/// Override with OZEN_PROMPT (empty string disables).
 const DEFAULT_WHISPER_PROMPT: &str = "הכתבה קולית של מפתח תוכנה ישראלי, עברית מדוברת עם \
 הרבה סלנג. מונחים טכניים באנגלית: commit, push, branch, merge, rebase, repo, terminal, \
 build, deploy, debug, test, refactor, function, endpoint, API, server, frontend, backend, \
@@ -84,7 +84,7 @@ struct AppState {
     /// Wall-clock ms when the current recording armed - drives the toggle-mode runaway cap.
     armed_at: AtomicU64,
     ollama_model: String,
-    /// Explicit override from ORELLIUS_STT_PROMPT. When unset the prompt is chosen per clip
+    /// Explicit override from OZEN_PROMPT. When unset the prompt is chosen per clip
     /// from the language mode, because a Hebrew-register prompt drags English clips to Hebrew.
     whisper_prompt: Option<String>,
 }
@@ -175,21 +175,68 @@ fn clean_transcript(text: &str) -> String {
     t.to_string()
 }
 
+/// Menu-bar frames: a dot plus 0-3 sound arcs, and a dimmed one-arc frame for idle. Template
+/// images (black + alpha), so macOS recolours them for a light or dark menu bar by itself.
+/// These are what make the menu bar say whether you are actually being HEARD - during a
+/// recording the arc count tracks live mic level, so a dead mic or a too-quiet room is visible
+/// at a glance instead of being discovered after the paste.
+const TRAY_IDLE: &[u8] = include_bytes!("../icons/tray-idle.png");
+const TRAY_LEVELS: [&[u8]; 4] = [
+    include_bytes!("../icons/tray-0.png"),
+    include_bytes!("../icons/tray-1.png"),
+    include_bytes!("../icons/tray-2.png"),
+    include_bytes!("../icons/tray-3.png"),
+];
+
+/// Live RMS -> arc count. Thresholds match the orb's `min(1, level * 9)` curve so the two
+/// indicators never disagree about how loud you are.
+fn arcs_for_level(level: f32) -> usize {
+    let v = (level * 9.0).min(1.0);
+    if v < 0.12 {
+        0
+    } else if v < 0.40 {
+        1
+    } else if v < 0.70 {
+        2
+    } else {
+        3
+    }
+}
+
+fn set_tray_icon(app: &AppHandle, bytes: &'static [u8]) {
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        if let (Some(tray), Ok(icon)) = (app.tray_by_id("main"), tauri::image::Image::from_bytes(bytes))
+        {
+            let _ = tray.set_icon(Some(icon));
+        }
+    });
+}
+
 fn set_tray(app: &AppHandle, s: TrayState) {
     let app_for_main = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(tray) = app_for_main.tray_by_id("main") {
+            // The icon carries the state now, so the title stays empty and the menu bar keeps
+            // its width - a text glyph beside the icon was always a workaround for a static one.
             let (title, tip) = match s {
-                TrayState::Idle => ("", "Orellius STT - מוכן"),
-                TrayState::Recording => ("●", "מקליט…"),
-                TrayState::Transcribing => ("⠿", "מתמלל…"),
-                TrayState::Translating => ("⠿", "מתרגם…"),
+                TrayState::Idle => ("", "Ozen - מוכן"),
+                TrayState::Recording => ("", "מקליט…"),
+                TrayState::Transcribing => ("", "מתמלל…"),
+                TrayState::Translating => ("", "מתרגם…"),
                 TrayState::Error => ("⚠", "שגיאה - ראה לוח בקרה"),
             };
             let _ = tray.set_title(Some(title));
             let _ = tray.set_tooltip(Some(tip));
         }
     });
+    match s {
+        TrayState::Idle | TrayState::Error => set_tray_icon(app, TRAY_IDLE),
+        TrayState::Recording => set_tray_icon(app, TRAY_LEVELS[0]),
+        // Processing has no level to show, so the arcs sweep as a spinner instead (driven by
+        // the thread in stop_recording).
+        TrayState::Transcribing | TrayState::Translating => set_tray_icon(app, TRAY_LEVELS[1]),
+    }
     let state_str = match s {
         TrayState::Idle => "idle",
         TrayState::Recording => "recording",
@@ -307,8 +354,22 @@ fn start_recording(app: &AppHandle, st: &Arc<AppState>) {
     let app = app.clone();
     let st = st.clone();
     std::thread::spawn(move || {
+        let mut tick: u32 = 0;
+        let mut shown_arcs = usize::MAX;
         while st.recording.load(Ordering::SeqCst) {
-            let _ = app.emit("level", st.audio.level());
+            let level = st.audio.level();
+            let _ = app.emit("level", level);
+            // Menu bar at ~8Hz, and only when the arc count actually changes: the orb wants
+            // 30Hz to look smooth, but re-assigning an NSImage that often just to redraw the
+            // same glyph is pure waste.
+            tick += 1;
+            if tick % 4 == 0 {
+                let arcs = arcs_for_level(level);
+                if arcs != shown_arcs {
+                    shown_arcs = arcs;
+                    set_tray_icon(&app, TRAY_LEVELS[arcs]);
+                }
+            }
             let elapsed = now_ms().saturating_sub(st.armed_at.load(Ordering::SeqCst));
             if elapsed >= deadline_ms {
                 let _ = app.emit("error", "הגיע לזמן ההקלטה המרבי - נעצר".to_string());
@@ -329,6 +390,22 @@ fn stop_recording(app: &AppHandle, st: &Arc<AppState>) {
     let samples = st.audio.stop();
     // Cue AFTER the stream is closed, so the tone can never bleed into the captured clip.
     st.cue(Cue::Stop);
+
+    // Sweep the arcs while the models work. Whisper and DictaLM take seconds, and a frozen
+    // menu-bar glyph during that is indistinguishable from a hung app.
+    {
+        let app = app.clone();
+        let st = st.clone();
+        std::thread::spawn(move || {
+            let mut i = 1usize;
+            while st.processing.load(Ordering::SeqCst) {
+                set_tray_icon(&app, TRAY_LEVELS[i]);
+                i = if i >= 3 { 1 } else { i + 1 };
+                std::thread::sleep(std::time::Duration::from_millis(280));
+            }
+        });
+    }
+
     let app = app.clone();
     let st = st.clone();
     std::thread::spawn(move || run_pipeline(app, st, samples));
@@ -624,12 +701,12 @@ fn build_state(app: &tauri::App) -> Result<Arc<AppState>, Box<dyn std::error::Er
     let store = Arc::new(Store::load(dir));
 
     // A hotkey passed by env is a one-off override; persist it so the dashboard shows the truth.
-    if let Ok(hk) = std::env::var("ORELLIUS_STT_HOTKEY") {
+    if let Ok(hk) = std::env::var("OZEN_HOTKEY") {
         let mut cfg = store.settings();
         cfg.hotkey = hk;
         store.save_settings(cfg);
     }
-    if let Ok(v) = std::env::var("ORELLIUS_STT_POLISH") {
+    if let Ok(v) = std::env::var("OZEN_POLISH") {
         let mut cfg = store.settings();
         cfg.polish = v != "0";
         store.save_settings(cfg);
@@ -644,7 +721,7 @@ fn build_state(app: &tauri::App) -> Result<Arc<AppState>, Box<dyn std::error::Er
         processing: AtomicBool::new(false),
         armed_at: AtomicU64::new(0),
         ollama_model: std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
-        whisper_prompt: std::env::var("ORELLIUS_STT_PROMPT").ok(),
+        whisper_prompt: std::env::var("OZEN_PROMPT").ok(),
     }))
 }
 
@@ -693,14 +770,14 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         ],
     )?;
 
-    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
+    let icon = tauri::image::Image::from_bytes(TRAY_IDLE)?;
 
     TrayIconBuilder::with_id("main")
         .icon(icon)
         .icon_as_template(true)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("Orellius STT - מוכן")
+        .tooltip("Ozen - מוכן")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_dashboard(app),
             "quit" => app.exit(0),
