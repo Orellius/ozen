@@ -160,6 +160,70 @@ fn is_latin_script(text: &str) -> bool {
     latin > hebrew && latin > 0
 }
 
+/// Which language the FOCUSED app speaks, as "he" or "en". The orb's drawer follows it, so the
+/// step names read in the language of whatever you are dictating into rather than always in
+/// Hebrew (his call, 2026-08-06).
+///
+/// Derived the way macOS itself derives it: an app's effective UI language is the FIRST of the
+/// user's preferred languages that the app actually localises. Reading only the user preference
+/// would say "en" for every app on this Mac; reading only the bundle would say "he" for anything
+/// that merely ships a Hebrew translation.
+///
+/// `lsappinfo` is used rather than AppleScript on purpose: System Events would raise an
+/// Automation consent prompt the first time, and a permission dialog in the middle of a
+/// dictation is worse than a wrong label. Measured at ~10ms, on the arm path, once per clip.
+fn front_app_lang() -> String {
+    fn sh(cmd: &str, args: &[&str]) -> Option<String> {
+        let out = std::process::Command::new(cmd).args(args).output().ok()?;
+        Some(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+    // User order, e.g. ("en-IL", "he-IL"). Read fresh per clip: it is one cheap call, and a
+    // cached value would survive a language change for the life of the process.
+    let prefs = sh("defaults", &["read", "-g", "AppleLanguages"]).unwrap_or_default();
+    let order: Vec<String> = prefs
+        .split('"')
+        .filter(|s| s.contains('-') || s.len() == 2)
+        .map(|s| s.split('-').next().unwrap_or("").to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let asn = sh("lsappinfo", &["front"]).unwrap_or_default();
+    let asn = asn.trim();
+    let bundle = if asn.is_empty() {
+        String::new()
+    } else {
+        sh("lsappinfo", &["info", "-only", "bundlepath", asn])
+            .unwrap_or_default()
+            .split('"')
+            .nth(3)
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let mut has: Vec<String> = Vec::new();
+    if !bundle.is_empty() {
+        if let Ok(rd) = std::fs::read_dir(format!("{bundle}/Contents/Resources")) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_lowercase();
+                if let Some(stem) = name.strip_suffix(".lproj") {
+                    has.push(match stem {
+                        "hebrew" => "he".to_string(),
+                        "english" => "en".to_string(),
+                        other => other.split('-').next().unwrap_or(other).to_string(),
+                    });
+                }
+            }
+        }
+    }
+    for want in &order {
+        if has.iter().any(|h| h == want) {
+            return want.clone();
+        }
+    }
+    // An app with no localisations at all (or one we could not read) is treated as English -
+    // the safe default, since a Hebrew label in an English app is the jarring direction.
+    "en".to_string()
+}
 fn rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
@@ -433,6 +497,9 @@ fn start_recording(app: &AppHandle, st: &Arc<AppState>) {
     st.cue(Cue::Start);
     st.armed_at.store(now_ms(), Ordering::SeqCst);
     set_tray(app, TrayState::Recording);
+    // Emitted BEFORE the drawer opens: the labels must already be right as it slides out, not
+    // swap language a frame later.
+    let _ = app.emit("uilang", front_app_lang());
 
     // Feed the pill's equalizer at ~30Hz, and enforce the runaway cap from the same loop: in
     // toggle mode nothing else will ever stop a recording the user forgot about.

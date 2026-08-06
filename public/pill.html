@@ -114,6 +114,10 @@
           if (name === "level") {
             setInterval(() => cb({ payload: 0.015 + Math.random() * 0.11 }), 60);
           }
+          if (name === "uilang") {
+            let en = false;
+            setInterval(() => { en = !en; cb({ payload: en ? "en" : "he" }); }, 14400);
+          }
           if (name === "state") {
             const cycle = ["idle", "recording", "recording", "transcribing", "translating", "pasting"];
             let i = 0;
@@ -145,21 +149,37 @@
        duration once it is done. The timer is what makes a slow stage legible as a slow stage
        rather than as a hang: a 6s translate reads as "the translator is working", which is the
        one thing a spinner can never say. */
+    // The drawer speaks the language of the app you are dictating INTO, not the language you are
+    // speaking. Emitted as "uilang" from Rust when a recording arms, derived the way macOS derives
+    // it: the first of your preferred languages that the target app actually localises.
     const STEPS = [
-      { key: "recording",    name: "שומע" },
-      { key: "transcribing", name: "מתמלל" },
-      { key: "translating",  name: "מתרגם" },
-      { key: "pasting",      name: "מוסר" },
+      { key: "recording",    he: "שומע",  en: "Hearing" },
+      { key: "transcribing", he: "מתמלל", en: "Transcribing" },
+      { key: "translating",  he: "מתרגם", en: "Translating" },
+      { key: "pasting",      he: "מוסר",  en: "Delivering" },
     ];
+    let uilang = "he";
     const stepsEl = document.getElementById("steps");
     const wrap = document.getElementById("wrap");
     const rows = STEPS.map((s) => {
       const el = document.createElement("div");
       el.className = "step";
-      el.innerHTML = `<span class="dot"></span><span class="name">${s.name}</span><span class="t"></span>`;
+      el.innerHTML = `<span class="dot"></span><span class="name">${s.he}</span><span class="t"></span>`;
       stepsEl.appendChild(el);
-      return { ...s, el, t: el.querySelector(".t"), started: 0, ms: 0, state: "pending" };
+      return { ...s, el, name: el.querySelector(".name"), t: el.querySelector(".t"),
+               started: 0, ms: 0, state: "pending" };
     });
+
+    /// Relabel in place. The direction flips with the language: Hebrew step names in a
+    /// left-aligned row read as broken, and the timer column has to swap sides with them.
+    function setLang(lang) {
+      uilang = lang === "he" ? "he" : "en";
+      for (const r of rows) {
+        r.name.textContent = uilang === "he" ? r.he : r.en;
+        r.el.style.direction = uilang === "he" ? "rtl" : "ltr";
+      }
+    }
+    listen("uilang", (e) => setLang(e.payload));
 
     function resetSteps() {
       for (const r of rows) {
