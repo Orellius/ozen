@@ -37,6 +37,8 @@ const EMPTY: Snapshot = {
     sound_volume: 0.35,
     dictionary: true,
     max_seconds: 180,
+    speech_lang: "auto",
+    accent_repair: true,
   },
   logs: [],
   rejections: [],

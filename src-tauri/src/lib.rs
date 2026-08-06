@@ -46,6 +46,25 @@ Claude. דוגמאות: יאללה, תעשה commit ותדחוף ל-branch. סב
 וואלה, ה-test נכשל, על הפנים, חבל על הזמן. רגע, שנייה, תריץ את זה שוב. נו, תכל'ס זה עובד, \
 קדימה, זהו. אין מצב, בוא'נה, אחלה. תפתח את main.rs ותוסיף function שמחזירה Result. בוא \
 נבדוק למה ה-server מחזיר שגיאה על ה-endpoint.";
+/// The English-register counterpart to the Hebrew prompt above, used when whisper is told to
+/// expect English. Written as accented dev-speech on purpose: whisper conditions on STYLE, so
+/// showing it fast, clipped, Israeli-accented English is what biases it away from decoding
+/// those clips as Hebrew or as generic newsreader English. Same ~224-token budget.
+const DEFAULT_EN_PROMPT: &str = "Fast, casual English dictation by an Israeli software \
+developer, spoken with a Hebrew accent and clipped articulation. Technical terms: commit, \
+push, branch, merge, rebase, repo, terminal, build, deploy, debug, test, refactor, function, \
+endpoint, API, server, frontend, backend, Rust, TypeScript, Python, Tauri, React, bun, cargo, \
+git, GitHub, Docker, macOS, Ollama, Claude. Examples: okay so let's commit this and push it to \
+the branch. The build passed, nice. Wait, the test is failing again, check why the server \
+returns an error on that endpoint. Open main.rs and add a function that returns a Result. \
+Let's just refactor the whole thing tomorrow.";
+/// Auto mode cannot know the language before decoding, so it gets a short bilingual bias
+/// rather than either full-register prompt - a Hebrew-only prompt actively pushes English
+/// clips toward Hebrew output, which is the failure this mode exists to avoid.
+const DEFAULT_AUTO_PROMPT: &str = "הכתבה של מפתח ישראלי, עברית או אנגלית, עם מונחים טכניים \
+באנגלית. Dictation by an Israeli developer, Hebrew or English, with English technical terms: \
+commit, push, branch, build, deploy, debug, test, refactor, function, endpoint, API, server, \
+Rust, TypeScript, Tauri, React, bun, cargo, git, GitHub, Docker, macOS, Ollama, Claude.";
 const MIN_SAMPLES: usize = 1600; // ~0.1s at 16k; shorter is a fat-finger, not speech.
 const RMS_FLOOR: f32 = 0.012; // below this the clip is silence/room noise.
 const SAMPLE_RATE: f32 = 16_000.0;
@@ -65,12 +84,24 @@ struct AppState {
     /// Wall-clock ms when the current recording armed - drives the toggle-mode runaway cap.
     armed_at: AtomicU64,
     ollama_model: String,
-    whisper_prompt: String,
+    /// Explicit override from ORELLIUS_STT_PROMPT. When unset the prompt is chosen per clip
+    /// from the language mode, because a Hebrew-register prompt drags English clips to Hebrew.
+    whisper_prompt: Option<String>,
 }
 
 impl AppState {
     fn settings(&self) -> Settings {
         self.store.settings()
+    }
+    fn prompt_for(&self, lang: &str) -> String {
+        if let Some(p) = &self.whisper_prompt {
+            return p.clone();
+        }
+        match lang {
+            "en" => DEFAULT_EN_PROMPT.to_string(),
+            "auto" => DEFAULT_AUTO_PROMPT.to_string(),
+            _ => DEFAULT_WHISPER_PROMPT.to_string(),
+        }
     }
     fn cue(&self, cue: Cue) {
         self.sound.play(cue);
@@ -103,6 +134,23 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Did this clip come back as English rather than Hebrew? Decided by script, not by a language
+/// tag: whisper's own detection is not exposed per-clip here, and the script of the output is
+/// the thing that actually determines which repair the text needs. Latin-dominant wins, so a
+/// mostly-English sentence carrying one Hebrew word still routes to the English repair.
+fn is_latin_script(text: &str) -> bool {
+    let mut latin = 0usize;
+    let mut hebrew = 0usize;
+    for c in text.chars() {
+        if c.is_ascii_alphabetic() {
+            latin += 1;
+        } else if ('\u{0590}'..='\u{05FF}').contains(&c) {
+            hebrew += 1;
+        }
+    }
+    latin > hebrew && latin > 0
 }
 
 fn rms(samples: &[f32]) -> f32 {
@@ -176,11 +224,19 @@ fn show_pill_on_main(app: &AppHandle) {
     // The Dock-style glass: a real NSVisualEffectView clipped to a circle (radius = half
     // the 72px window). CSS backdrop-filter on a transparent Tauri window paints a square
     // halo - measured 2026-08-06 - so the material lives at the window layer instead.
+    //
+    // Two details are what make it read as Dock rather than as a grey disc:
+    // - `Popover` is the milky menu/popover glass. `HudWindow` (used until 0.3.0) is the flat
+    //   dark HUD material and never picks up the luminance behind it.
+    // - `Active` is REQUIRED here. The default follows the window's active state, and this
+    //   window is deliberately never key (focusable:false, so the synthetic Cmd+V always
+    //   reaches the user's app) - so it would render in its INACTIVE appearance forever,
+    //   which is exactly the flat, lifeless grey. Forced Active is what turns the blur on.
     #[cfg(target_os = "macos")]
     if let Err(e) = window_vibrancy::apply_vibrancy(
         &pill,
-        window_vibrancy::NSVisualEffectMaterial::HudWindow,
-        None,
+        window_vibrancy::NSVisualEffectMaterial::Popover,
+        Some(window_vibrancy::NSVisualEffectState::Active),
         Some(36.0),
     ) {
         eprintln!("[pill] vibrancy failed: {e}");
@@ -296,10 +352,12 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         return;
     }
 
+    let cfg = st.settings();
+    let lang = cfg.speech_lang.as_str();
     set_tray(&app, TrayState::Transcribing);
     let asr_start = Instant::now();
     let hebrew = match whisper_engine() {
-        Ok(engine) => match engine.transcribe(&samples, "he", &st.whisper_prompt) {
+        Ok(engine) => match engine.transcribe(&samples, lang, &st.prompt_for(lang)) {
             Ok(t) => t,
             Err(e) => {
                 emit_error(&app, &st, &format!("תמלול נכשל: {e}"), "asr");
@@ -323,10 +381,18 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         return;
     }
 
-    let cfg = st.settings();
+    // What came back decides the route, not what was requested: in auto mode the clip may have
+    // been English all along, and there is nothing to translate about English - but plenty to
+    // repair, because Hebrew-accented English breaks in a small, predictable set of ways.
+    let spoke_english = is_latin_script(&hebrew);
     let mut llm_ms = 0u64;
     let mut mode = "raw";
-    let english = if cfg.translate || cfg.polish {
+    let needs_llm = if spoke_english {
+        cfg.accent_repair
+    } else {
+        cfg.translate || cfg.polish
+    };
+    let english = if needs_llm {
         set_tray(&app, TrayState::Translating);
         st.cue(Cue::Working);
         // The learned dictionary, narrowed to the terms this sentence actually contains.
@@ -336,7 +402,10 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
             Hints::default()
         };
         let llm_start = Instant::now();
-        let result = if cfg.translate {
+        let result = if spoke_english {
+            mode = "repair";
+            translate::repair_english(&hebrew, &st.ollama_model, &hints)
+        } else if cfg.translate {
             mode = "translate";
             translate::to_english(&hebrew, &st.ollama_model, &hints)
         } else {
@@ -575,8 +644,7 @@ fn build_state(app: &tauri::App) -> Result<Arc<AppState>, Box<dyn std::error::Er
         processing: AtomicBool::new(false),
         armed_at: AtomicU64::new(0),
         ollama_model: std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
-        whisper_prompt: std::env::var("ORELLIUS_STT_PROMPT")
-            .unwrap_or_else(|_| DEFAULT_WHISPER_PROMPT.to_string()),
+        whisper_prompt: std::env::var("ORELLIUS_STT_PROMPT").ok(),
     }))
 }
 

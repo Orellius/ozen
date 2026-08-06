@@ -9,9 +9,12 @@ Tauri 2 with a native (non-webview) audio path and a 2026 model stack. The repo 
 ## The loop
 
 ```
-tap Right-⌘  ->  cpal mic capture (16k mono)  ->  whisper (ivrit-ai, he)
+tap Right-⌘  ->  cpal mic capture (16k mono)  ->  whisper (ivrit-ai, he|en|auto)
    ->  clean (drop whisper's silence hallucinations)
-   ->  DictaLM 3.0 (he -> en, local) + learned term hints
+   ->  route by SCRIPT of the result:
+        Hebrew out  ->  DictaLM 3.0 translate (he -> en) or polish (he -> he)
+        English out ->  DictaLM 3.0 accent repair (Hebrew-L1 English)
+      ...both with learned term hints for this sentence
    ->  clipboard + synthetic Cmd+V into the focused app
    ->  log the pair, count it toward the dictionary
 ```
@@ -32,6 +35,7 @@ while you are looking at the terminal rather than at the orb.
 | Translate | local **DictaLM 3.0 Nemotron 12B Instruct** via Ollama (`he -> en`) |
 | Paste | `arboard` clipboard (save/restore) + `CGEvent` Cmd+V |
 | Cues | synthesized sine motifs through a persistent `cpal` output stream (`sound.rs`) |
+| Orb | Dock-tile squircle, native `NSVisualEffectView` glass + a canvas light (`public/pill.html`) |
 | Memory | JSON store: settings, utterance log, learned dictionary (`store.rs`) |
 | Dashboard | React 19 + TypeScript strict + Vite, Hebrew RTL, three tabs |
 
@@ -71,9 +75,18 @@ in `src-tauri/.cargo/config.toml`: ggml's `@available` checks emit
 `MACOSX_DEPLOYMENT_TARGET=13.0` and links Apple's compiler-rt explicitly. Don't delete
 either line, and refresh the compiler-rt path on Xcode major bumps.
 
-An **always-on-top orb** floats top-center (draggable) - pulsing red on the real mic level
-while recording, then מתמלל/מתרגם, then a green flash of what was pasted. It never takes
-focus, so the paste always lands in your app.
+An **always-on-top orb** floats top-center (draggable): a Dock-tile squircle of real macOS
+vibrancy glass with a living light inside it. The light is one asymmetric blob deformed by
+harmonics at unrelated frequencies, drifting on a slow Lissajous path and lit from an
+off-centre core, so it reads as glowing from within rather than as a coloured shape. It
+follows the real mic level while recording (fast attack, slow release, so it keeps glowing
+between words) and shifts colour per stage. It never takes focus, so the paste always lands
+in your app.
+
+Two non-obvious details make the glass work: the material is `Popover` (the milky menu glass,
+not the flat `HudWindow` HUD material), and it is forced to `NSVisualEffectState::Active` -
+the default follows window-active state, and this window is deliberately never key, so it
+would otherwise render in its lifeless inactive appearance forever.
 
 The app lives in the menu bar (aleph icon); left-click opens the dashboard, right-click for
 the menu. Tap **Right-⌘**, speak Hebrew, tap again.
@@ -138,6 +151,34 @@ word - a sagging ratio means dropped content), correction rate, and rejections b
 reason (short / silent / no text / ASR / LLM / paste).
 
 Everything persists to `~/Library/Application Support/ai.orellius.stt/`.
+
+## Israeli-accented English
+
+Speaking English is now a first-class path, not a degraded Hebrew one. `speech_lang` is
+`auto` by default, so whisper detects per clip; the **script of the result** then picks the
+repair, which means a clip that came out English skips translation entirely and gets an
+accent repair pass instead.
+
+The repair is prompt-driven and targets a specific, closed set - Hebrew's phoneme inventory
+is missing several English contrasts outright, so the errors are predictable rather than
+random:
+
+| Hebrew L1 gap | How it surfaces in the transcript |
+|---|---|
+| no /w/ (labiovelar) | `ve` / `vant` / `vorld` for we / want / world |
+| no /θ/ | `tink` / `sink` for think, `tree` for three |
+| no /ð/ | `de` / `ze` for the, `dis` for this |
+| no /æ/ vs /e/ | `bed` for bad, `men` for man |
+| no /ɪ/ vs /iː/ | `sheep` for ship |
+| final cluster reduction | `ask` for asked |
+| `-ing` -> `-ink` | `workink` for working |
+| no indefinite article | dropped a / an |
+
+Whisper also gets a register-matched initial prompt per language mode - Hebrew dev-speak,
+fast accented English dev-speak, or a short bilingual bias in auto. This matters more than it
+sounds: a Hebrew-register prompt actively drags English clips toward Hebrew output.
+
+Toggle it off in **הגדרות → שפה** if you want the raw transcript.
 
 ## Roadmap (not built yet)
 

@@ -41,6 +41,25 @@ Tauri whisper core from `~/Archive/_OSS/orellius-voice`, with a NATIVE audio pat
 
 ## Non-obvious constraints (v0.3.0 additions first)
 
+- **The pipeline routes on the SCRIPT of the ASR output, not on the requested language.**
+  `speech_lang` defaults to `auto`, so a clip may come back English; English gets
+  `repair_english` (Hebrew-L1 accent repair) and never gets translated. `is_latin_script` in
+  `lib.rs` is the switch - Latin-dominant wins, so one Hebrew word inside an English sentence
+  does not flip the route.
+- **The whisper initial prompt is chosen PER LANGUAGE MODE.** A Hebrew-register prompt drags
+  English clips toward Hebrew output, which defeats auto mode entirely. `ORELLIUS_STT_PROMPT`
+  still overrides all three (it is `Option<String>` now - unset means "pick by mode", not
+  "use the Hebrew one").
+- **The aligner learns ONLY from `mode == "translate"`.** A repair pass is en->en, so feeding
+  it to `observe()` would key the table on English tokens and pollute the Hebrew side.
+- **The orb's vibrancy MUST be forced `NSVisualEffectState::Active`.** The window is
+  `focusable:false` and therefore never key, so the default (follow window-active state)
+  renders the material in its inactive, flat-grey appearance permanently. This was the real
+  reason it never looked like the Dock. Material is `Popover`, not `HudWindow`.
+- **The orb tile radius lives in two places that must agree**: `--radius` in
+  `public/pill.html` and the radius argument to `apply_vibrancy` in `lib.rs`. The CSS clips
+  the canvas light; the material clips the glass. Diverge and the silhouette doubles.
+
 - **Toggle mode fires on a CLEAN TAP, never on the press.** Right-⌘ is a real modifier, so
   acting on press would make Right-⌘+C start a recording. `hotkey.rs` watches every other
   KeyDown while our key is held and reports `clean_tap = alone && held <= 400ms`. If you ever

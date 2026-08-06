@@ -5,7 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type InputMode = "toggle" | "hold";
-export type OutputMode = "translate" | "polish" | "raw";
+/** "repair" = the clip was already English and got accent repair instead of translation. */
+export type OutputMode = "translate" | "polish" | "repair" | "raw";
+export type SpeechLang = "he" | "en" | "auto";
 export type PipelineState =
   | "idle"
   | "recording"
@@ -26,6 +28,8 @@ export interface Settings {
   sound_volume: number;
   dictionary: boolean;
   max_seconds: number;
+  speech_lang: SpeechLang;
+  accent_repair: boolean;
 }
 
 /** store.rs :: LogEntry */

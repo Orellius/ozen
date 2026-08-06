@@ -58,6 +58,10 @@ pub struct Settings {
     pub dictionary: bool,
     /// Auto-stop for toggle mode, seconds. A forgotten toggle must not record forever.
     pub max_seconds: u64,
+    /// What whisper is told to expect: "he", "en", or "auto" (detect per clip).
+    pub speech_lang: String,
+    /// Repair Hebrew-accented English before pasting (see translate.rs REPAIR_PROMPT).
+    pub accent_repair: bool,
 }
 
 impl Default for Settings {
@@ -71,6 +75,8 @@ impl Default for Settings {
             sound_volume: 0.35,
             dictionary: true,
             max_seconds: 180,
+            speech_lang: "auto".to_string(),
+            accent_repair: true,
         }
     }
 }

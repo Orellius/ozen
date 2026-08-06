@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { cmd, type CueName, type InputMode, type Settings, type Term } from "../ipc";
+import {
+  cmd,
+  type CueName,
+  type InputMode,
+  type Settings,
+  type SpeechLang,
+  type Term,
+} from "../ipc";
 
 const CUES: { id: CueName; label: string }[] = [
   { id: "start", label: "התחלה" },
@@ -68,6 +75,31 @@ export function SettingsPage({
           />
         </label>
         <p className="note">שינוי מקש נכנס לתוקף בהפעלה מחדש של האפליקציה.</p>
+      </div>
+
+      <h2 className="sec">שפה</h2>
+      <div className="panel">
+        <label className="field">
+          <span>שפת דיבור</span>
+          <select
+            value={settings.speech_lang}
+            onChange={(e) => patch({ speech_lang: e.target.value as SpeechLang })}
+          >
+            <option value="auto">זיהוי אוטומטי</option>
+            <option value="he">עברית</option>
+            <option value="en">אנגלית</option>
+          </select>
+        </label>
+        <Switch
+          checked={settings.accent_repair}
+          onChange={(v) => patch({ accent_repair: v })}
+          label="תיקון מבטא ישראלי באנגלית"
+        />
+        <p className="note">
+          כשהקלט יוצא באנגלית אין מה לתרגם - יש מה לתקן. השכבה מכירה את ההחלפות הקבועות של
+          דובר עברית: w שנשמע v, th שנשמע t/s/d/z, a קצרה שנשמעת e, ‎-ing שנשמע ‎-ink,
+          וצרורות עיצורים שנבלעים בדיבור מהיר.
+        </p>
       </div>
 
       <h2 className="sec">פלט</h2>
