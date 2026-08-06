@@ -8,6 +8,10 @@ This document turns that into a rubric, a set of pipeline changes, and a way to 
 of it worked. Evidence base: 85 real utterances from
 `~/Library/Application Support/ai.orellius.ozen/log.json`, read 2026-08-06.
 
+**The log is live and was being written to during this analysis** - it read 70 entries at the start,
+85 mid-way, and 92 by the end of the session. Every count below is stated against the snapshot it was
+measured on. Re-measure before quoting any of them.
+
 ---
 
 ## 1. What "UN-grade" actually is
@@ -105,7 +109,7 @@ All "before" columns are verbatim from the live log. "After" is what an interpre
 | 37 | `שהקונטקסטואליטי שלך נמוך` | "that your **contextuality** is low" | "that you're running low on context" | Register, not lexis |
 | 1 | `הנאזל לא יתחבר לרכב... לימיט לאורך של הנאזל פייפ` | "the **nasal** doesn't connect... the length of the **nasal** pipe" | "the nozzle shouldn't connect... a limit on the nozzle pipe's length" | Domain noun |
 | 73 | `אם אין הופרס בין פלוט לפלוט... תפריט שאתה יכול לעשות ויזית` | "if there's no **handover** between plots... a menu you can make **visually**" | "if there are no doors between plots... a menu you can use to visit" | Two collapses, fluent output |
-| 3, 9, 11, 15, ... | *31 of 85 transcripts begin with `, `* | 7 of those commas survive into the pasted English | *(strip before the model, as `trim_leading_noise` now does)* | Already fixed in v0.5.x |
+| 3, 9, 11, 15, ... | *31 of 85 transcripts begin with `, `* | 11 outputs still begin with punctuation | *(strip before the model, as `trim_leading_noise` now does)* | Partly fixed in v0.5.x |
 
 Note the pattern in rows 64, 73 and 59: **the output is fluent, grammatical English every time.**
 Nothing downstream can see the defect. That is the whole problem. A pipeline that is graded on fluency
