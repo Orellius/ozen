@@ -1,26 +1,36 @@
 <!doctype html>
-<!-- The orb: a Dock-tile squircle of milky glass with a living light inside it.
+<!-- The orb: a Dock-tile squircle of milky glass with a CHARACTER in it, and a steps drawer
+     that opens while a clip is being processed.
 
      The glass is NOT drawn here. It is a real NSVisualEffectView applied to the WINDOW
      (see show_pill in lib.rs) - CSS backdrop-filter on a transparent Tauri window paints a
      square halo, measured 2026-08-06. This page is fully transparent and contributes only
-     the tile's edge treatment plus the canvas light.
+     the tile's edge treatment plus what is drawn on the canvas.
 
-     The light is one asymmetric blob that drifts inside the frame, deformed by several
-     harmonics at unrelated frequencies so it never visibly repeats, lit from an off-centre
-     core so it reads as glowing from within rather than as a coloured shape. State is
-     colour and behaviour: idle breathes, recording follows the REAL mic level ("level"
-     events, ~30Hz), transcribing/translating churn, paste flashes green, error red. -->
-<html lang="he" dir="rtl">
+     WHAT CHANGED IN 0.6.0 (Orel's call, 2026-08-06):
+     - The synapse web is gone. There is a capybara, and its MOUTH IS THE MIC LEVEL, so the
+       question the indicator exists to answer ("are you hearing me?") is answered by the first
+       thing the eye lands on rather than by a colour the user has to learn.
+     - The character REACTS per stage: ears up and leaning in while listening, pad and pen out
+       and writing while transcribing, pen tapping while translating, page handed over on paste.
+     - A STEPS DRAWER opens while a clip is in flight: hear - transcribe - translate - deliver,
+       each with a live timer, so the current stage is visible at a glance. It shows the STEPS
+       and NOT the transcript: reading text back here would mean digging through a transcript,
+       which is what the dashboard is for.
+
+     The window is resizable (56..480 square at rest). Opening the drawer resizes the window
+     itself, and the tile size the user chose is remembered across open/close. -->
+<html lang="he">
 <head>
 <meta charset="utf-8" />
 <style>
   :root {
-    /* The window is RESIZABLE, so only the radius is fixed here - and it must equal
-       PILL_RADIUS in lib.rs, which clips the glass. It stays constant rather than scaling with
-       the window because window-vibrancy's apply_vibrancy ADDS a new NSVisualEffectView every
-       call and never removes the old one, so re-applying it per resize would stack views
-       without bound. A constant corner on a resizable panel is the normal look anyway. */
+    /* Must equal PILL_RADIUS in lib.rs, which clips the glass material. It stays constant
+       rather than scaling with the window because window-vibrancy's apply_vibrancy ADDS a new
+       NSVisualEffectView every call and never removes the old one, so re-applying it per resize
+       would stack views without bound. The window's MINIMUM is 72px for the same reason: a 23px
+       corner on a 56px box is a 0.41 ratio, which reads as a stadium/ellipse rather than as a
+       tile, and the corner cannot be changed after startup. */
     --radius: 23px;
   }
   html, body {
@@ -32,21 +42,45 @@
     user-select: none;
     -webkit-user-select: none;
     cursor: grab;
+    font: 11px/1.3 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
   }
   body:active { cursor: grabbing; }
 
-  /* Clips the light to the tile. Without it the glow squares off at the window corners and
-     the squircle silhouette is lost. */
-  #tile {
-    position: absolute;
-    inset: 0;
-    border-radius: var(--radius);
-    overflow: hidden;
+  /* LTR on purpose even though the labels are Hebrew: the tile must stay anchored where the
+     user parked it and the drawer must grow to the RIGHT. In RTL the canvas would sit at the
+     right edge and the window would appear to jump sideways every time a clip starts. */
+  #wrap {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    border-radius: var(--radius); overflow: hidden; direction: ltr;
   }
-  canvas {
-    position: absolute;
-    inset: 0;
+  canvas { display: block; flex: none; }
+
+  #steps {
+    flex: 1; min-width: 0; height: 100%;
+    display: none; flex-direction: column; justify-content: center;
+    gap: 2px; padding: 6px 10px 6px 2px;
   }
+  #wrap.open #steps { display: flex; }
+  .step {
+    display: flex; align-items: center; gap: 7px; direction: rtl;
+    color: rgba(255,255,255,0.42); white-space: nowrap;
+    transition: color .18s ease;
+  }
+  .step .dot {
+    width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: rgba(255,255,255,0.22);
+    box-shadow: none;
+  }
+  .step .name { flex: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.45); }
+  .step .t { font-variant-numeric: tabular-nums; font-size: 10px; opacity: 0.75; direction: ltr; }
+  .step.done { color: rgba(255,255,255,0.66); }
+  .step.done .dot { background: #52d1a4; }
+  .step.live { color: #fff; font-weight: 600; }
+  .step.live .dot { background: #6ea8ff; box-shadow: 0 0 8px #6ea8ff; animation: pulse 1s ease-in-out infinite; }
+  .step.fail { color: #ffb4ae; }
+  .step.fail .dot { background: #ff6b6b; }
+  @keyframes pulse { 50% { transform: scale(0.6); opacity: 0.55; } }
+
   /* The edge treatment that makes it read as a Dock tile rather than a floating rectangle:
      a bright specular hairline along the top, a hairline outline, and a contact shade at the
      bottom. All inset - the window is exactly tile-sized, so an outer shadow would be clipped. */
@@ -63,7 +97,10 @@
 </style>
 </head>
 <body>
-  <div id="tile"><canvas id="eq"></canvas></div>
+  <div id="wrap">
+    <canvas id="eq"></canvas>
+    <div id="steps"></div>
+  </div>
   <div id="edge"></div>
   <script>
     // Degrade to a standalone page when there is no Tauri around it. This is not defensive
@@ -78,9 +115,9 @@
             setInterval(() => cb({ payload: 0.015 + Math.random() * 0.11 }), 60);
           }
           if (name === "state") {
-            const cycle = ["idle", "recording", "recording", "transcribing", "translating"];
+            const cycle = ["idle", "recording", "recording", "transcribing", "translating", "pasting"];
             let i = 0;
-            setInterval(() => cb({ payload: cycle[i++ % cycle.length] }), 3200);
+            setInterval(() => cb({ payload: cycle[i++ % cycle.length] }), 2400);
           }
         };
 
@@ -103,304 +140,393 @@
       });
     }
 
+    /* ============================ THE STEPS DRAWER ============================
+       Four steps, in pipeline order, each carrying a live timer while it runs and its final
+       duration once it is done. The timer is what makes a slow stage legible as a slow stage
+       rather than as a hang: a 6s translate reads as "the translator is working", which is the
+       one thing a spinner can never say. */
+    const STEPS = [
+      { key: "recording",    name: "שומע" },
+      { key: "transcribing", name: "מתמלל" },
+      { key: "translating",  name: "מתרגם" },
+      { key: "pasting",      name: "מוסר" },
+    ];
+    const stepsEl = document.getElementById("steps");
+    const wrap = document.getElementById("wrap");
+    const rows = STEPS.map((s) => {
+      const el = document.createElement("div");
+      el.className = "step";
+      el.innerHTML = `<span class="dot"></span><span class="name">${s.name}</span><span class="t"></span>`;
+      stepsEl.appendChild(el);
+      return { ...s, el, t: el.querySelector(".t"), started: 0, ms: 0, state: "pending" };
+    });
+
+    function resetSteps() {
+      for (const r of rows) {
+        r.state = "pending"; r.started = 0; r.ms = 0;
+        r.el.className = "step"; r.t.textContent = "";
+      }
+    }
+    /** Mark `key` live; everything before it is done. Order carries the completion, so a stage
+        that is skipped entirely (translation off) still closes out the ones behind it. */
+    function markLive(key) {
+      const idx = rows.findIndex((r) => r.key === key);
+      if (idx < 0) return;
+      rows.forEach((r, i) => {
+        if (i < idx) {
+          if (r.state === "live") { r.ms = performance.now() - r.started; }
+          if (r.state !== "pending" || r.ms) { r.state = "done"; r.el.className = "step done"; }
+          if (r.ms) r.t.textContent = (r.ms / 1000).toFixed(1) + "s";
+        } else if (i === idx) {
+          if (r.state !== "live") { r.state = "live"; r.started = performance.now(); }
+          r.el.className = "step live";
+        }
+      });
+    }
+    function finishSteps(ok) {
+      for (const r of rows) {
+        if (r.state === "live") {
+          r.ms = performance.now() - r.started;
+          r.state = ok ? "done" : "fail";
+          r.el.className = "step " + (ok ? "done" : "fail");
+          r.t.textContent = (r.ms / 1000).toFixed(1) + "s";
+        }
+      }
+      if (ok) {
+        const last = rows[rows.length - 1];
+        if (last.state === "pending") { last.state = "done"; last.el.className = "step done"; }
+      }
+    }
+    function tickTimers() {
+      for (const r of rows) {
+        if (r.state === "live") r.t.textContent = ((performance.now() - r.started) / 1000).toFixed(1) + "s";
+      }
+    }
+
+    /* ==================== WINDOW GEOMETRY: OPEN AND CLOSE ====================
+       The tile size is the user's; the drawer is ours. `tileSize` is captured only while idle,
+       so a resize made with the drawer open cannot be mistaken for a new tile size. */
+    const DRAWER_W = 132;   // logical px of steps column
+    const MIN_OPEN_H = 104; // four rows need this much; a smaller tile grows to it and back
+    let tileSize = 104;
+    let isOpen = false;
+    let geomBusy = false;
+
+    async function setOpen(open) {
+      if (!TAURI || open === isOpen || geomBusy) return;
+      geomBusy = true;
+      try {
+        const { getCurrentWindow, LogicalSize, LogicalPosition } = window.__TAURI__.window;
+        const win = getCurrentWindow();
+        const scale = await win.scaleFactor();
+        const size = (await win.innerSize()).toLogical(scale);
+        const pos = (await win.outerPosition()).toLogical(scale);
+        if (!open) {
+          await win.setSize(new LogicalSize(tileSize, tileSize));
+        } else {
+          tileSize = Math.round(Math.min(size.width, size.height));
+          const w = tileSize + DRAWER_W;
+          const h = Math.max(tileSize, MIN_OPEN_H);
+          // Grow to the right, unless that would run off the screen - then take the width from
+          // the left instead. The orb lives next to the Dock; a drawer that opens off-screen is
+          // a drawer that does not exist.
+          const room = window.screen.availWidth - (pos.x + w);
+          if (room < 8) await win.setPosition(new LogicalPosition(Math.max(0, pos.x - (8 - room)), pos.y));
+          await win.setSize(new LogicalSize(w, h));
+        }
+        isOpen = open;
+        wrap.classList.toggle("open", open);
+      } catch (e) {
+        // A geometry failure must never take the indicator down with it: the character keeps
+        // animating in whatever size the window happens to be.
+        console.error("[pill] resize failed", e);
+        isOpen = open;
+        wrap.classList.toggle("open", open);
+      } finally {
+        geomBusy = false;
+      }
+    }
+    if (!TAURI) {
+      // Standalone preview: no window to resize, so just toggle the class.
+      window.__previewOpen = (v) => wrap.classList.toggle("open", v);
+    }
+
+    /* ============================== THE CHARACTER ==============================
+       One rig, read by the draw code: eyes 1 = wide open / 0 = shut, mouth 0 = closed / 1 =
+       wide, look = where the pupils point, ears = perk, prop = what he is holding. */
     const canvas = document.getElementById("eq");
     const DPR = window.devicePixelRatio || 2;
     const ctx = canvas.getContext("2d");
-
-    // The window is resizable, so nothing here may bake in a size. W/H are the live window,
-    // SIZE is the smaller of the two and is what every radius scales off, so the organism stays
-    // round-ish in a non-square window instead of shearing.
-    let W = 104;
-    let H = 104;
-    let SIZE = 104;
-    let CX = 52;
-    let CY = 52;
-
-    // Random-walk state for the whole organism. Declared HERE on purpose: an earlier revision
-    // lost these declarations in a refactor, `vx` was read before assignment, and NaN
-    // propagated into every coordinate - the canvas drew nothing at all and looked like a
-    // blank tile rather than an error.
-    let px = CX;
-    let py = CY;
-    let vx = 0;
-    let vy = 0;
-    let tx = CX;
-    let ty = CY;
-    let nextRetarget = 0;
+    let TILE = 104;
 
     function fit() {
-      W = Math.max(48, window.innerWidth);
-      H = Math.max(48, window.innerHeight);
-      SIZE = Math.min(W, H);
-      CX = W / 2;
-      CY = H / 2;
-      canvas.width = Math.round(W * DPR);
-      canvas.height = Math.round(H * DPR);
-      canvas.style.width = W + "px";
-      canvas.style.height = H + "px";
-      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      // Re-centre so a resize never leaves the organism drifting outside the new frame.
-      px = CX;
-      py = CY;
-      tx = CX;
-      ty = CY;
-      vx = 0;
-      vy = 0;
+      // The canvas is always the SQUARE part of the window; the rest is the drawer.
+      TILE = Math.max(48, Math.min(window.innerWidth, window.innerHeight));
+      canvas.style.width = TILE + "px";
+      canvas.style.height = TILE + "px";
+      canvas.width = Math.round(TILE * DPR);
+      canvas.height = Math.round(TILE * DPR);
     }
     fit();
     window.addEventListener("resize", fit);
 
-    // Each state is a light, not a colour swatch: `core` is the hot centre, `rim` the falloff,
-    // `energy` how hard the blob is driven, `drift` how far it wanders from centre.
-    // `glow` is the light SPILLING onto the glass, and it is deliberately 0 at idle. Painting
-    // it at idle fills the whole tile with a haze of the rim colour, so the orb sits in a navy
-    // wash instead of floating in clear glass. The spill belongs to activity, not to presence.
-    const STATES = {
-      idle:         { core: [200, 218, 255], rim: [120, 150, 220], energy: 0.16, drift: 2.2, speed: 0.30, glow: 0.00 },
-      recording:    { core: [255, 214, 202], rim: [255,  69,  58], energy: 1.00, drift: 5.0, speed: 1.15, glow: 0.55 },
-      transcribing: { core: [255, 240, 190], rim: [255, 214,  10], energy: 0.52, drift: 4.0, speed: 0.95, glow: 0.30 },
-      translating:  { core: [206, 244, 255], rim: [100, 210, 255], energy: 0.52, drift: 4.0, speed: 0.95, glow: 0.30 },
-      done:         { core: [214, 255, 224], rim: [ 48, 209,  88], energy: 0.70, drift: 2.0, speed: 0.55, glow: 0.45 },
-      error:        { core: [255, 205, 200], rim: [255,  69,  58], energy: 0.85, drift: 1.5, speed: 1.30, glow: 0.45 },
+    const TINT = {
+      idle:         [150, 170, 200],
+      recording:    [110, 168, 255],
+      transcribing: [150, 140, 235],
+      translating:  [190, 130, 225],
+      pasting:      [ 90, 200, 255],
+      done:         [ 82, 209, 164],
+      error:        [255, 107, 107],
     };
 
     let mode = "idle";
-    let level = 0;        // live mic RMS, 0..~0.2
+    let level = 0;      // live mic RMS, 0..~0.2
     let flashUntil = 0;
-    // Everything the eye sees is an eased value, never the raw target - a snap between states
-    // reads as a glitch, and the whole point is that this thing feels alive.
-    let shown = {
-      core: [...STATES.idle.core],
-      rim: [...STATES.idle.rim],
-      energy: 0.16,
-      drift: 2.2,
-      speed: 0.3,
-      glow: 0.0,
-    };
-    let loudness = 0;
+    let blinkAt = 0, blinkTil = 0;
 
     listen("state", (e) => {
       const s = e.payload;
       if (s === "idle") {
-        if (Date.now() >= flashUntil) mode = "idle";
+        if (Date.now() >= flashUntil) { mode = "idle"; setOpen(false); }
         return;
       }
+      if (s === "recording") { resetSteps(); setOpen(true); }
+      if (s === "error") { finishSteps(false); mode = "error"; flashUntil = Date.now() + 1800; return; }
       mode = s;
+      markLive(s);
     });
     listen("level", (e) => { level = e.payload; });
-    listen("result", () => { mode = "done"; flashUntil = Date.now() + 1200; });
-    listen("error", () => { mode = "error"; flashUntil = Date.now() + 1600; });
+    listen("result", () => {
+      finishSteps(true);
+      mode = "done";
+      flashUntil = Date.now() + 1600;
+      // Hold the finished steps on screen briefly - the whole point is being able to SEE what
+      // it did, and a drawer that vanishes the instant it finishes cannot be read.
+      setTimeout(() => { if (Date.now() >= flashUntil - 50) setOpen(false); }, 1700);
+    });
+    listen("error", () => {
+      finishSteps(false);
+      mode = "error";
+      flashUntil = Date.now() + 1800;
+      setTimeout(() => setOpen(false), 2000);
+    });
 
-    const lerp = (a, b, k) => a + (b - a) * k;
-    const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
-
-    /**
-     * The MEMBRANE: the asymmetric boundary the network lives inside. Same harmonics as before
-     * (2/3/5/7, no common factor, so the silhouette never repeats), but it is no longer drawn -
-     * it is the region nodes are positioned relative to. That is what makes the constellation
-     * flex as one organism instead of as points floating in a bag.
-     */
-    function membrane(angle, r, wob, t) {
-      const d =
-        Math.sin(angle * 2 + t * 0.9) * 0.55 +
-        Math.sin(angle * 3 - t * 1.3) * 0.3 +
-        Math.sin(angle * 5 + t * 0.6) * 0.16 +
-        Math.sin(angle * 7 - t * 1.9) * 0.08;
-      return r * (1 + d * wob);
+    function rig(st, loud, t, blink) {
+      switch (st) {
+        case "recording":
+          return { eyes: 1.0 * blink, mouth: 0.12 + 0.88 * loud, look: [0, 0.05], ears: 1, lean: 0.5,
+                   prop: "none", tint: TINT.recording };
+        case "transcribing":
+          return { eyes: 0.9 * blink, mouth: 0.06, look: [0.15, 0.75], ears: 0.4, lean: 0.25,
+                   prop: "write", tint: TINT.transcribing };
+        case "translating":
+          return { eyes: 0.85 * blink, mouth: 0.05, look: [0.55 * Math.sin(t * 1.1 + 1), -0.5],
+                   ears: 0.2, lean: 0, prop: "think", tint: TINT.translating };
+        case "pasting":
+          return { eyes: 1.0 * blink, mouth: 0.25, look: [0, -0.1], ears: 0.7, lean: 0,
+                   prop: "show", tint: TINT.pasting };
+        case "done":
+          return { eyes: 0, mouth: 0.55, look: [0, 0], ears: 1, lean: 0, happy: true,
+                   prop: "hand", tint: TINT.done };
+        case "error":
+          // Ears flat, eyes wide, mouth small. Distress without a scary face - this fires on a
+          // failed paste, not on a catastrophe.
+          return { eyes: 1.0, mouth: 0.10, look: [0.3 * Math.sin(t * 8), 0.3], ears: 0, lean: 0,
+                   prop: "none", tint: TINT.error };
+        default:
+          return { eyes: 0.82 * blink, mouth: 0.03, look: [0.25 * Math.sin(t * 0.4), 0.1],
+                   ears: 0.6, lean: 0, prop: "none", tint: TINT.idle };
+      }
     }
 
-    // Nodes are stored in POLAR coordinates relative to the membrane - an angle and a fraction
-    // of the local radius - not as x/y. That is the whole trick: when the membrane deforms,
-    // every node follows it for free, so the network stretches and squashes as a body.
-    const NODE_COUNT = 20;
-    const nodes = Array.from({ length: NODE_COUNT }, () => ({
-      a: Math.random() * Math.PI * 2,
-      rf: 0.12 + Math.sqrt(Math.random()) * 0.86, // sqrt keeps them area-uniform, not centre-heavy
-      va: (Math.random() - 0.5) * 0.006,
-      vrf: (Math.random() - 0.5) * 0.004,
-      lit: 0,                                      // brightness left over from a pulse landing
-    }));
-
-    // A pulse travelling from one node to another: the synapse firing. This is the part that
-    // makes it read as a brain rather than as a particle toy.
-    const pulses = [];
-    let nextFire = 0;
-
-    let t = 0;
-    function frame() {
-      const target = STATES[mode] || STATES.idle;
-      // Ease every property toward the active state. 0.07 is slow enough to see the change
-      // happen and fast enough that a stage boundary still feels immediate.
-      for (let i = 0; i < 3; i++) {
-        shown.core[i] = lerp(shown.core[i], target.core[i], 0.07);
-        shown.rim[i] = lerp(shown.rim[i], target.rim[i], 0.07);
+    function eye(c, x, y, r, open, look, happy) {
+      if (happy) {
+        // A closed, upturned arc reads as delight; a straight closed line reads as asleep.
+        c.lineWidth = Math.max(1.4, r * 0.42); c.lineCap = "round";
+        c.strokeStyle = "#1b2029";
+        c.beginPath(); c.arc(x, y + r * 0.25, r * 0.95, Math.PI * 1.12, Math.PI * 1.88); c.stroke();
+        return;
       }
-      shown.energy = lerp(shown.energy, target.energy, 0.07);
-      shown.drift = lerp(shown.drift, target.drift, 0.07);
-      shown.speed = lerp(shown.speed, target.speed, 0.07);
-      shown.glow = lerp(shown.glow, target.glow, 0.07);
-
-      // Mic level is spiky; ease it asymmetrically - fast attack so a syllable registers, slow
-      // release so the network keeps firing through the gaps between words.
-      const raw = Math.min(1, level * 9);
-      loudness = raw > loudness ? lerp(loudness, raw, 0.45) : lerp(loudness, raw, 0.1);
-
-      t += 0.016 * (0.6 + shown.speed);
-      ctx.clearRect(0, 0, W, H);
-
-      // Unpredictable wander of the whole organism. A Lissajous path is periodic, so the eye
-      // learns it within seconds and it stops reading as alive; this picks random destinations
-      // at random intervals and is pulled toward them by a damped spring.
-      if (t >= nextRetarget) {
-        const reach = SIZE * 0.045 * (0.4 + shown.drift * 0.16);
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.sqrt(Math.random()) * reach;
-        tx = CX + Math.cos(a) * r;
-        ty = CY + Math.sin(a) * r;
-        nextRetarget = t + 0.35 + Math.random() * 1.6;
+      const h = Math.max(0.06, open);
+      c.fillStyle = "#1b2029";
+      c.beginPath(); c.ellipse(x, y, r, r * h, 0, 0, 6.2832); c.fill();
+      if (h > 0.35) {
+        // Two highlights, unequal: one specular dot and one faint rim. A single centred dot is
+        // what makes cartoon eyes look dead.
+        c.fillStyle = "rgba(255,255,255,0.95)";
+        c.beginPath(); c.arc(x + r * (0.34 + look[0] * 0.2), y - r * (0.30 - look[1] * 0.2), r * 0.30, 0, 6.2832); c.fill();
+        c.fillStyle = "rgba(255,255,255,0.35)";
+        c.beginPath(); c.arc(x - r * 0.36, y + r * 0.30, r * 0.15, 0, 6.2832); c.fill();
       }
-      const stiff = 0.01 + 0.02 * shown.energy;
-      vx = (vx + (tx - px) * stiff) * 0.9;
-      vy = (vy + (ty - py) * stiff) * 0.9;
-      px += vx;
-      py += vy;
-      const cx = px;
-      const cy = py;
+    }
 
-      // Size IS the volume readout. Ceiling is 80% of the tile as a diameter.
-      const drive = mode === "recording" ? loudness : 1;
-      const breathe = 1 + 0.04 * Math.sin(t * 1.1);
-      const MAX_R = SIZE * 0.4;
-      const span = mode === "recording" ? 0.52 + 0.48 * loudness : 0.78;
-      const radius = MAX_R * span * breathe;
-      const wob = 0.1 + 0.2 * shown.energy * (0.45 + 0.55 * drive);
+    function mouth(c, x, y, w, open) {
+      // Clamped: at full mic level an unclamped ellipse runs past the bottom of the muzzle and
+      // reads as a drip hanging off the chin rather than as an open mouth.
+      const h = Math.max(1.2, w * Math.min(open, 0.62) * 0.8);
+      c.fillStyle = "#1b2029";
+      c.beginPath();
+      if (open < 0.14) {
+        c.roundRect(x - w * 0.42, y - 0.9, w * 0.84, 1.8, 1.2);
+      } else {
+        c.ellipse(x, y + h * 0.10, w * (0.36 + open * 0.14), h * 0.86, 0, 0, 6.2832);
+      }
+      c.fill();
+      if (open > 0.3) {
+        // A tongue, not the state colour: tinting it made him drip blue while listening.
+        c.fillStyle = "rgba(214,126,138,0.9)";
+        c.beginPath(); c.ellipse(x, y + h * 0.5, w * 0.20, h * 0.30, 0, 0, 6.2832); c.fill();
+      }
+    }
 
-      // --- move the nodes, then resolve them to screen space through the membrane ---
-      const pts = [];
-      for (const n of nodes) {
-        n.a += n.va * (0.5 + shown.speed);
-        n.rf += n.vrf * (0.5 + shown.speed);
-        // Reflect at the edges rather than wrapping: wrapping teleports a node across the
-        // organism, which the eye reads as a glitch.
-        if (n.rf > 0.98 || n.rf < 0.10) {
-          n.vrf *= -1;
-          n.rf = Math.max(0.1, Math.min(0.98, n.rf));
+    /* PROPS. The character reacts by DOING something: pad and pen out for transcribing, pen
+       lifted and tapping for translating, page held up while delivering, handed over on done.
+       HONEST LIMIT: below ~90px of tile the pad is four grey pixels, so smaller tiles get a
+       compact page glyph instead. If the character is the point, size the orb above 90. */
+    function drawProps(c, W, r, t) {
+      if (r.prop === "none") return;
+      const u = W / 100;
+      if (W < 90) {
+        const x = u * 30, y = u * 30;
+        c.fillStyle = "rgba(255,255,255,0.92)";
+        c.beginPath(); c.roundRect(x - u * 9, y - u * 11, u * 18, u * 22, u * 3); c.fill();
+        c.strokeStyle = "rgba(0,0,0,0.35)"; c.lineWidth = Math.max(1, u * 1.2);
+        const lines = r.prop === "write" ? 1 + Math.floor((t * 3) % 3) : 3;
+        for (let i = 0; i < lines; i++) {
+          c.beginPath(); c.moveTo(x - u * 5.5, y - u * 5 + i * u * 5); c.lineTo(x + u * 5.5, y - u * 5 + i * u * 5); c.stroke();
         }
-        // Occasional retarget keeps the drift from settling into a steady orbit.
-        if (Math.random() < 0.004) {
-          n.va = (Math.random() - 0.5) * 0.008;
-          n.vrf = (Math.random() - 0.5) * 0.005;
-        }
-        n.lit *= 0.94;
-        const rr = membrane(n.a, radius, wob, t) * n.rf;
-        pts.push({ x: cx + Math.cos(n.a) * rr, y: cy + Math.sin(n.a) * rr, n });
+        return;
+      }
+      const writing = r.prop === "write", think = r.prop === "think";
+      const show = r.prop === "show", hand = r.prop === "hand";
+      const slide = hand ? Math.min(1, ((t * 1.2) % 1) * 1.6) : 0;
+      const px = show ? 0 : u * (writing ? 16 : 20) + slide * u * 46;
+      const py = show ? u * 6 : u * 34;
+
+      c.save();
+      c.translate(px, py); c.rotate(show ? 0 : writing ? 0.16 : 0.1);
+      c.scale(show ? 1.15 : 0.95, show ? 1.15 : 0.95);
+      c.globalAlpha = hand ? 1 - slide * 0.85 : 1;
+      c.fillStyle = "#f6f2e8";
+      c.beginPath(); c.roundRect(-u * 17, -u * 21, u * 34, u * 42, u * 3); c.fill();
+      c.strokeStyle = "rgba(0,0,0,0.22)"; c.lineWidth = Math.max(1, u * 0.9);
+      c.beginPath(); c.roundRect(-u * 17, -u * 21, u * 34, u * 42, u * 3); c.stroke();
+      // While writing the lines fill in one at a time and the last one is short. A full page of
+      // text under a pen that is still moving is the tell of a fake writing animation.
+      const total = 5;
+      const filled = writing ? 1 + Math.floor((t * 1.6) % total) : total;
+      c.strokeStyle = "rgba(40,46,60,0.55)"; c.lineWidth = Math.max(1, u * 1.6); c.lineCap = "round";
+      for (let i = 0; i < filled; i++) {
+        const w = i === filled - 1 && writing ? u * (6 + 14 * ((t * 1.6) % 1)) : u * 24;
+        const y = -u * 14 + i * u * 7.5;
+        c.beginPath(); c.moveTo(-u * 12, y); c.lineTo(-u * 12 + w, y); c.stroke();
+      }
+      c.restore();
+
+      if (writing || think) {
+        const tapY = think ? Math.sin(t * 6) * u * 3 : 0;
+        const runX = writing ? u * (6 + 14 * ((t * 1.6) % 1)) : 0;
+        c.save();
+        c.translate(
+          writing ? px - u * 12 + runX : u * 26,
+          writing ? py - u * 14 + Math.floor((t * 1.6) % 5) * u * 7.5 : -u * 8 + tapY
+        );
+        c.rotate(writing ? -0.7 : -0.35);
+        c.fillStyle = "#2f6fd0";
+        c.beginPath(); c.roundRect(-u * 1.8, -u * 20, u * 3.6, u * 20, u * 1.6); c.fill();
+        c.fillStyle = "#1b1611";
+        c.beginPath(); c.moveTo(-u * 1.8, 0); c.lineTo(u * 1.8, 0); c.lineTo(0, u * 4); c.closePath(); c.fill();
+        c.restore();
+      }
+    }
+
+    /* The capybara. The tells, from the reference photo, and dropping any two of them turns it
+       back into a teddy bear (which is exactly what the first attempt was): brick-shaped head
+       wider than tall with small top corners; TINY ears set high and far back; a muzzle taking
+       two thirds of the face; small eyes set high and wide; dry grey-brown, not chocolate. */
+    function drawCapybara(c, W, r, t) {
+      const cx = W / 2, cy = W / 2, u = W / 100;
+      const bob = Math.sin(t * (r.mouth > 0.2 ? 6 : 1.4)) * u * (r.mouth > 0.2 ? 1.6 : 0.8);
+      c.save();
+      c.translate(cx, cy + bob + (r.lean || 0) * u * 2);
+      c.rotate(r.look[0] * 0.05 + (r.lean || 0) * 0.04);
+      c.scale(1 + (r.lean || 0) * 0.04, 1 + (r.lean || 0) * 0.04);
+
+      // Ears perk when listening and flatten while working - legible even at 50px, where the
+      // eyes are three pixels wide.
+      const perk = 0.55 + 0.45 * (r.ears ?? 0.6);
+      for (const sx of [-1, 1]) {
+        const ey = -u * (20 + 4 * perk);
+        c.fillStyle = "#6b5943";
+        c.beginPath(); c.ellipse(sx * u * 31, ey, u * 4.4 * perk, u * 3.6 * perk, sx * 0.7, 0, 6.2832); c.fill();
+        c.fillStyle = "#463829";
+        c.beginPath(); c.ellipse(sx * u * 31.5, ey + u * 0.4, u * 2.0 * perk, u * 1.6 * perk, sx * 0.7, 0, 6.2832); c.fill();
       }
 
-      // --- the grid: links appear between nodes that drift close together ---
-      // The threshold WIDENS with loudness, so the network visibly densifies as you speak and
-      // thins back out in silence. That is the volume readout the eye actually notices.
-      const linkMax = radius * (0.62 + 0.30 * (mode === "recording" ? loudness : 0.35));
-      const edges = [];
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.lineWidth = 1;
-      for (let i = 0; i < pts.length; i++) {
-        for (let j = i + 1; j < pts.length; j++) {
-          const dx = pts[i].x - pts[j].x;
-          const dy = pts[i].y - pts[j].y;
-          const dist = Math.hypot(dx, dy);
-          if (dist > linkMax) continue;
-          edges.push([i, j]);
-          // Opacity falls off toward the threshold, so links FADE in and out instead of
-          // popping - that fade is what separates a living network from a static mesh.
-          const k = 1 - dist / linkMax;
-          ctx.strokeStyle = rgba(shown.rim, 0.06 + 0.42 * k * k);
-          ctx.beginPath();
-          ctx.moveTo(pts[i].x, pts[i].y);
-          ctx.lineTo(pts[j].x, pts[j].y);
-          ctx.stroke();
-        }
-      }
-      ctx.restore();
+      const g = c.createLinearGradient(0, -u * 30, 0, u * 34);
+      g.addColorStop(0, "#a68f6f"); g.addColorStop(1, "#7f6a4e");
+      c.fillStyle = g;
+      c.beginPath(); c.roundRect(-u * 39, -u * 26, u * 78, u * 54, [u * 12, u * 12, u * 22, u * 22]); c.fill();
 
-      // --- fire a synapse ---
-      // Rate scales hard with speech: silence is a slow, sparse blink; talking is a storm.
-      if (t >= nextFire && edges.length > 0) {
-        const [i, j] = edges[(Math.random() * edges.length) | 0];
-        pulses.push({ i, j, u: 0, speed: 0.020 + Math.random() * 0.03 });
-        const rate = 0.10 + 0.9 * (1 - (mode === "recording" ? loudness : 0.25));
-        nextFire = t + rate * (0.4 + Math.random());
-      }
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      for (let k = pulses.length - 1; k >= 0; k--) {
-        const p = pulses[k];
-        p.u += p.speed * (0.6 + shown.speed);
-        if (p.u >= 1 || !pts[p.i] || !pts[p.j]) {
-          if (pts[p.j]) pts[p.j].n.lit = 1; // the far end lights up as the signal lands
-          pulses.splice(k, 1);
-          continue;
-        }
-        const x = pts[p.i].x + (pts[p.j].x - pts[p.i].x) * p.u;
-        const y = pts[p.i].y + (pts[p.j].y - pts[p.i].y) * p.u;
-        const trail = ctx.createRadialGradient(x, y, 0, x, y, 3.2);
-        trail.addColorStop(0, rgba([255, 255, 255], 0.95));
-        trail.addColorStop(0.5, rgba(shown.core, 0.5));
-        trail.addColorStop(1, rgba(shown.core, 0));
-        ctx.fillStyle = trail;
-        ctx.beginPath();
-        ctx.arc(x, y, 3.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
+      c.fillStyle = "#b89c78";
+      c.beginPath(); c.roundRect(-u * 33, -u * 3, u * 66, u * 33, [u * 12, u * 12, u * 20, u * 20]); c.fill();
 
-      // --- the nodes themselves, drawn last so they sit on top of their own links ---
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      for (const p of pts) {
-        const lit = p.n.lit;
-        const r = 1.15 + 1.7 * lit + 0.5 * drive;
-        const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.4);
-        halo.addColorStop(0, rgba(shown.core, 0.85 + 0.15 * lit));
-        halo.addColorStop(0.35, rgba(shown.rim, 0.30 + 0.4 * lit));
-        halo.addColorStop(1, rgba(shown.rim, 0));
-        ctx.fillStyle = halo;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r * 3.4, 0, Math.PI * 2);
-        ctx.fill();
-        // A hard white centre keeps the point readable at 104px, where a pure glow turns to mush.
-        ctx.fillStyle = rgba([255, 255, 255], 0.75 + 0.25 * lit);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r * 0.62, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-
-      // A faint bloom behind everything, so the network still reads as lit from within rather
-      // than as a flat wireframe. Zero at idle - see `glow` in STATES.
-      const spill = shown.glow * (mode === "recording" ? 0.35 + 0.65 * drive : 1);
-      if (spill > 0.02) {
-        ctx.save();
-        ctx.globalCompositeOperation = "lighter";
-        ctx.filter = "blur(10px)";
-        const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-        bg.addColorStop(0, rgba(shown.rim, 0.30 * spill));
-        bg.addColorStop(1, rgba(shown.rim, 0));
-        ctx.fillStyle = bg;
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+      c.fillStyle = "#3d2f26";
+      c.beginPath(); c.roundRect(-u * 16, 0, u * 32, u * 11, u * 5); c.fill();
+      c.fillStyle = "rgba(255,255,255,0.16)";
+      c.beginPath(); c.roundRect(-u * 13, u * 1.2, u * 26, u * 3, u * 1.5); c.fill();
+      c.fillStyle = "#1d1611";
+      for (const sx of [-1, 1]) {
+        c.beginPath(); c.ellipse(sx * u * 7, u * 6.5, u * 2.1, u * 2.8, sx * 0.3, 0, 6.2832); c.fill();
       }
 
-      // Specular sweep across the top of the tile - the glass catching light, not the orb.
-      const sg = ctx.createLinearGradient(0, 0, 0, H * 0.55);
-      sg.addColorStop(0, "rgba(255,255,255,0.10)");
-      sg.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = sg;
-      ctx.fillRect(0, 0, W, H * 0.55);
+      eye(c, -u * 24, -u * 15, u * 4.2, r.eyes, r.look, r.happy);
+      eye(c, u * 24, -u * 15, u * 4.2, r.eyes, r.look, r.happy);
+      mouth(c, 0, u * 20, u * 16, r.mouth);
+
+      // Paws only when he is holding something: permanent floating hands look like a costume.
+      if (r.prop && r.prop !== "none" && W >= 90) {
+        c.fillStyle = "#7f6a4e";
+        c.beginPath(); c.ellipse(-u * 20, u * 34, u * 8, u * 6, -0.3, 0, 6.2832); c.fill();
+        c.beginPath(); c.ellipse(u * 22, u * 32, u * 8, u * 6, 0.3, 0, 6.2832); c.fill();
+      }
+      drawProps(c, W, r, t);
+      c.restore();
+    }
+
+    function frame(nowMs) {
+      const t = nowMs / 1000;
+      // Blink is irregular on purpose: a metronomic blink reads as a screensaver.
+      if (nowMs > blinkAt) { blinkAt = nowMs + 1800 + Math.random() * 3600; blinkTil = nowMs + 130; }
+      const blink = nowMs < blinkTil ? 0.05 : 1;
 
       if ((mode === "done" || mode === "error") && Date.now() >= flashUntil) mode = "idle";
+
+      // Same curve the menu-bar meter uses, so the two indicators can never disagree about how
+      // loud the room is.
+      const loud = Math.min(1, level * 9);
+      const r = rig(mode, loud, t, blink);
+
+      const W = canvas.width, cx = W / 2, cy = W / 2;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, W, W);
+
+      // The state colour survives as a halo, so the stage is still readable from the corner of
+      // the eye without looking at the face.
+      const [r0, g0, b0] = r.tint;
+      const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.56);
+      halo.addColorStop(0, `rgba(${r0},${g0},${b0},${mode === "idle" ? 0.16 : 0.36})`);
+      halo.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(cx, cy, W * 0.56, 0, 6.2832); ctx.fill();
+
+      ctx.save();
+      ctx.scale(DPR, DPR);
+      drawCapybara(ctx, W / DPR, r, t);
+      ctx.restore();
+
+      tickTimers();
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);

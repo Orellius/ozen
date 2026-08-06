@@ -602,6 +602,10 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         hebrew.clone()
     };
 
+    // The fourth step of the drawer in `pill.html`. It has no TrayState of its own on purpose -
+    // the menu bar has nothing useful to say about a paste that takes a few milliseconds, but
+    // the orb's step list would otherwise end with "translate" and never close out.
+    let _ = app.emit("state", "pasting");
     let pasted = paste::paste_text(&english);
     if let Err(e) = &pasted {
         emit_error(&app, &st, &format!("הדבקה נכשלה: {e}"), "paste");

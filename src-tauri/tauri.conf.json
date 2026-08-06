@@ -29,9 +29,9 @@
         "title": "",
         "width": 104,
         "height": 104,
-        "minWidth": 56,
-        "minHeight": 56,
-        "maxWidth": 480,
+        "minWidth": 72,
+        "minHeight": 72,
+        "maxWidth": 900,
         "maxHeight": 480,
         "visible": false,
         "resizable": true,
@@ -55,7 +55,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
