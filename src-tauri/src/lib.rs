@@ -167,10 +167,83 @@ fn rms(samples: &[f32]) -> f32 {
     (sum / samples.len() as f32).sqrt()
 }
 
+/// Hesitation sounds. Whisper transcribes them faithfully, which is correct of it and useless
+/// here: they are the sound of thinking, not of speaking. Matched after trailing punctuation is
+/// removed, because they almost always arrive as "אה..." rather than bare.
+/// Hebrew fillers only - the English ones ("um", "uh") are also real English words in context
+/// ("um" never is, but "er"/"a" are), and the English path is a repair pass with grammatical
+/// context, so it drops them by prompt instead.
+const FILLERS: &[&str] = &[
+    "אה", "אהה", "אההה", "אמ", "אמם", "אממ", "המ", "המם", "אוו", "אהם", "אמממ",
+];
+
+/// Leading punctuation that whisper emits when the clip's first phoneme is clipped or when it
+/// continues the initial prompt's sentence. Measured 2026-08-06 in the live log: 22 of 66
+/// transcripts began with ", " - and 7 of those commas survived translation into the pasted
+/// English, which is what "it doesn't capitalize" actually looks like. The first character was
+/// never a letter.
+/// A leading hyphen is NOT stripped unless a space follows it: `--force` and `-m` are flags the
+/// prompts promise to preserve verbatim, and eating those dashes is a far worse failure than
+/// leaving a stray bullet dash in place. Caught by a test, not by review.
+pub(crate) fn trim_leading_noise(s: &str) -> &str {
+    let mut t = s;
+    loop {
+        let stripped = t.trim_start_matches(|c: char| {
+            c.is_whitespace() || matches!(c, ',' | '.' | '·' | '…' | ';' | ':' | '!' | '?' | '\u{05BE}')
+        });
+        // "- text" is a dictated bullet; "-m" is an argument.
+        let stripped = match stripped.strip_prefix("- ") {
+            Some(rest) => rest,
+            None => stripped,
+        };
+        if stripped == t {
+            return t;
+        }
+        t = stripped;
+    }
+}
+
+/// Drop filler tokens and tidy the punctuation they leave behind. Done BEFORE the LLM, not
+/// after: a filler inside the input makes the model build a sentence around it ("we can
+/// system... use the buttons" in the live log), and no post-processing can unmake that.
+fn strip_fillers(text: &str) -> String {
+    let kept: Vec<&str> = text
+        .split_whitespace()
+        .filter(|w| {
+            let core = w.trim_matches(|c: char| !c.is_alphanumeric());
+            !FILLERS.contains(&core)
+        })
+        .collect();
+    let joined = kept.join(" ");
+    // Removing "אה..." from "לגבי הפורינג, אה... תבנה" leaves ", תבנה" hanging off the previous
+    // clause; collapse the orphaned punctuation so the model is not handed a broken sentence.
+    let mut out = String::with_capacity(joined.len());
+    let mut prev_punct = false;
+    for c in joined.chars() {
+        let is_punct = matches!(c, ',' | ';' | '.' | '…');
+        if is_punct && prev_punct {
+            continue;
+        }
+        if is_punct && out.ends_with(' ') {
+            out.pop();
+        }
+        prev_punct = is_punct;
+        out.push(c);
+    }
+    out
+}
+
 /// Whisper invents a few stock Hebrew phrases on silence/noise (subtitle credits, "thank you").
 /// The RMS floor catches most silence; this drops the rest so junk never reaches translation.
+/// It also removes the two artifacts that are always noise and never speech: a leading comma
+/// and hesitation sounds.
+/// ORDER MATTERS: the noise is stripped BEFORE the blocklist is consulted, not after. The
+/// blocklist is an exact-match list, and a hallucination that arrives as ", תודה רבה." is not
+/// equal to "תודה רבה." - it walked straight through the gate. Caught by the test below, which
+/// is the only reason this is written down rather than shipped.
 fn clean_transcript(text: &str) -> String {
-    let t = text.trim();
+    let stripped = strip_fillers(text.trim());
+    let t = trim_leading_noise(&stripped).trim_end();
     const EXACT: &[&str] = &["תודה", "תודה רבה", "תודה רבה.", "תודה.", "להתראות"];
     if EXACT.contains(&t) {
         return String::new();
@@ -843,4 +916,46 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The live case, verbatim from the utterance log on 2026-08-06. 22 of 66 transcripts began
+    /// with ", " and 7 of those commas reached the pasted English - which is what "it doesn't
+    /// capitalize the first letter" actually is: the first character was never a letter.
+    #[test]
+    fn leading_comma_from_whisper_is_removed() {
+        let raw = ", ואולי במקום להשתמש בפרומפטים עצמם, אפשר לעשות";
+        let out = clean_transcript(raw);
+        assert!(out.starts_with('ו'), "got {out:?}");
+        // The comma INSIDE the sentence is real punctuation and must survive.
+        assert!(out.contains("עצמם,"), "got {out:?}");
+    }
+
+    /// Fillers are dropped with the punctuation they drag along, and the clause they were sitting
+    /// in does not end up with an orphaned comma.
+    #[test]
+    fn hesitations_are_dropped_without_breaking_punctuation() {
+        let raw = "לגבי הפורינג, אה... תבנה את זה מחדש. אה... לא הבנתי";
+        let out = clean_transcript(raw);
+        assert!(!out.contains("אה"), "got {out:?}");
+        assert!(!out.contains(".."), "got {out:?}");
+        assert!(out.contains("הפורינג, תבנה"), "got {out:?}");
+    }
+
+    /// A word that merely CONTAINS a filler's letters is not a filler. "אהבתי" starts with אה.
+    #[test]
+    fn only_whole_filler_tokens_are_dropped() {
+        let out = clean_transcript("אהבתי את זה, המשך");
+        assert_eq!(out, "אהבתי את זה, המשך");
+    }
+
+    /// The hallucination blocklist still fires - this pass must not have widened a gate.
+    #[test]
+    fn silence_hallucinations_still_blocked() {
+        assert_eq!(clean_transcript("תודה רבה."), "");
+        assert_eq!(clean_transcript(", תודה רבה."), "");
+    }
 }
