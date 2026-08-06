@@ -3,6 +3,7 @@ import {
   cmd,
   type CueName,
   type InputMode,
+  type Mishearing,
   type Settings,
   type SpeechLang,
   type Term,
@@ -19,6 +20,7 @@ const CUES: { id: CueName; label: string }[] = [
 interface SettingsPageProps {
   settings: Settings;
   glossary: Term[];
+  mishearings: Mishearing[];
   modelReady: boolean;
   onChange: (next: Settings) => void;
   onToast: (msg: string, kind?: "error" | "ok") => void;
@@ -27,6 +29,7 @@ interface SettingsPageProps {
 export function SettingsPage({
   settings,
   glossary,
+  mishearings,
   modelReady,
   onChange,
   onToast,
@@ -156,6 +159,36 @@ export function SettingsPage({
         המילון {glossary.length > 0 ? <span className="muted">({glossary.length})</span> : null}
       </h2>
       <Glossary glossary={glossary} onToast={onToast} />
+
+      <h2 className="sec">
+        מילים שנשמעו לא נכון{" "}
+        {mishearings.length > 0 ? <span className="muted">({mishearings.length})</span> : null}
+      </h2>
+      <div className="panel">
+        {mishearings.length === 0 ? (
+          <p className="empty">
+            כשתתקן משפט ביומן, והמילה שתיקנת נשמעת דומה למה שנכתב, הכלל נשמר כאן ויתוקן
+            אוטומטית מכאן והלאה.
+          </p>
+        ) : (
+          <div className="terms">
+            {mishearings.map((m) => (
+              <div key={m.heard} className={m.locked ? "term is-locked" : "term"}>
+                <span className="t-he" dir="ltr">
+                  {m.heard}
+                </span>
+                <span className="t-en" dir="ltr">
+                  {m.meant}
+                </span>
+                <span className="t-n">{m.locked ? "אושר" : `×${m.hits}`}</span>
+                <button className="fix" onClick={() => void cmd.forgetMishearing(m.heard)}>
+                  מחק
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <h2 className="sec">הרשאות</h2>
       <div className="panel">

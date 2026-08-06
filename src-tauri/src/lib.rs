@@ -13,6 +13,7 @@
 mod audio;
 mod hotkey;
 mod paste;
+mod phonetics;
 mod sound;
 mod store;
 mod translate;
@@ -29,7 +30,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 use audio::AudioHandle;
 use sound::{Cue, SoundHandle};
-use store::{Hints, LogEntry, Rejection, Settings, Store, Term};
+use store::{Hints, LogEntry, Mishearing, Rejection, Settings, Store, Term};
 use whisper::WhisperEngine;
 
 const DEFAULT_MODEL: &str = "hf.co/dicta-il/DictaLM-3.0-Nemotron-12B-Instruct-GGUF:Q6_K";
@@ -68,7 +69,7 @@ Rust, TypeScript, Tauri, React, bun, cargo, git, GitHub, Docker, macOS, Ollama, 
 /// Corner radius of the orb tile. MUST equal `--radius` in `public/pill.html`: this clips the
 /// glass material, that clips the light drawn over it, and a mismatch leaves tile corners with
 /// no glass in them (which reads as a flat dark square, not as a wrong colour).
-const PILL_RADIUS: f64 = 16.0;
+const PILL_RADIUS: f64 = 23.0;
 const MIN_SAMPLES: usize = 1600; // ~0.1s at 16k; shorter is a fat-finger, not speech.
 const RMS_FLOOR: f32 = 0.012; // below this the clip is silence/room noise.
 const SAMPLE_RATE: f32 = 16_000.0;
@@ -131,6 +132,7 @@ struct Snapshot {
     logs: Vec<LogEntry>,
     rejections: Vec<Rejection>,
     glossary: Vec<Term>,
+    mishearings: Vec<Mishearing>,
 }
 
 fn now_ms() -> u64 {
@@ -461,12 +463,21 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         }
     };
     let asr_ms = asr_start.elapsed().as_millis() as u64;
-    let hebrew = clean_transcript(&hebrew);
+    let (detected_lang, confidence) = (hebrew.lang.clone(), hebrew.confidence);
+    let hebrew = clean_transcript(&hebrew.text);
     if hebrew.is_empty() {
         emit_error(&app, &st, "לא זוהה טקסט", "empty");
         finish(&app, &st);
         return;
     }
+    // Confirmed mishearings are repaired BEFORE the model sees the text. These came from Orel
+    // correcting the same word himself, so there is nothing left to decide - and fixing them
+    // up front also stops the model from building a wrong sentence around a wrong word.
+    let (hebrew, auto_fixed) = if cfg.dictionary {
+        st.store.apply_known(&hebrew)
+    } else {
+        (hebrew, 0)
+    };
 
     // What came back decides the route, not what was requested: in auto mode the clip may have
     // been English all along, and there is nothing to translate about English - but plenty to
@@ -479,6 +490,7 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
     } else {
         cfg.translate || cfg.polish
     };
+    let mut hints_used = 0usize;
     let english = if needs_llm {
         set_tray(&app, TrayState::Translating);
         st.cue(Cue::Working);
@@ -488,6 +500,7 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         } else {
             Hints::default()
         };
+        hints_used = hints.count();
         let llm_start = Instant::now();
         let result = if spoke_english {
             mode = "repair";
@@ -530,8 +543,15 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         asr_ms,
         llm_ms,
         mode: mode.to_string(),
+        lang: detected_lang,
+        confidence,
+        hints_used,
+        auto_fixed,
     };
     st.store.append_log(entry.clone());
+    // Vocabulary is built from what was ACCEPTED, never from raw ASR - otherwise the first
+    // mishearing enters the vocabulary and starts attracting correct words toward itself.
+    st.store.note_vocab(&english);
     // Every produced pair feeds the aligner. It stays silent until a pairing repeats, so a
     // single bad translation cannot teach the dictionary anything (store.rs MIN_HITS).
     if cfg.dictionary && mode == "translate" {
@@ -557,6 +577,7 @@ fn get_state(state: State<'_, Arc<AppState>>) -> Snapshot {
         logs: state.store.logs(),
         rejections: state.store.rejections(),
         glossary: state.store.glossary(),
+        mishearings: state.store.mishearings(),
     }
 }
 
@@ -603,6 +624,7 @@ fn correct_entry(
     let ok = state.store.correct(at, corrected.trim());
     if ok {
         let _ = app.emit("glossary", state.store.glossary());
+        let _ = app.emit("mishearings", state.store.mishearings());
     }
     ok
 }
@@ -622,6 +644,12 @@ fn forget_term(app: AppHandle, state: State<'_, Arc<AppState>>, he: String) {
 #[tauri::command]
 fn clear_logs(state: State<'_, Arc<AppState>>) {
     state.store.clear_logs();
+}
+
+#[tauri::command]
+fn forget_mishearing(app: AppHandle, state: State<'_, Arc<AppState>>, heard: String) {
+    state.store.forget_mishearing(heard.trim());
+    let _ = app.emit("mishearings", state.store.mishearings());
 }
 
 #[tauri::command]
@@ -655,6 +683,7 @@ pub fn run() {
             correct_entry,
             set_term,
             forget_term,
+            forget_mishearing,
             clear_logs,
             request_accessibility,
             request_microphone

@@ -43,6 +43,7 @@ const EMPTY: Snapshot = {
   logs: [],
   rejections: [],
   glossary: [],
+  mishearings: [],
 };
 
 interface Toast {
@@ -75,6 +76,7 @@ export function App() {
       on("model-ready", (ok) => setSnap((p) => ({ ...p, model_ready: ok }))),
       on("settings", (settings) => setSnap((p) => ({ ...p, settings }))),
       on("glossary", (glossary) => setSnap((p) => ({ ...p, glossary }))),
+      on("mishearings", (mishearings) => setSnap((p) => ({ ...p, mishearings }))),
       on("needs-accessibility", (msg) => setAxError(msg)),
     ];
 
@@ -166,6 +168,7 @@ export function App() {
           <SettingsPage
             settings={snap.settings}
             glossary={snap.glossary}
+            mishearings={snap.mishearings}
             modelReady={snap.model_ready}
             onChange={saveSettings}
             onToast={showToast}

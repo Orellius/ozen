@@ -40,7 +40,36 @@ Tauri whisper core from `~/Archive/_OSS/orellius-voice`, with a NATIVE audio pat
   all-workspaces, draggable. Needs `macOSPrivateApi: true` for transparency on macOS, and
   `withGlobalTauri: true` because it uses `window.__TAURI__` rather than bundled imports.
 
-## Non-obvious constraints (v0.4.0 rebrand first)
+## Non-obvious constraints (v0.5.0 - the self-correcting layer)
+
+- **The mishearing layer is the only thing that can see a "comic push".** A misheard word is
+  spelled correctly and sits in a grammatical sentence, so spell check and LLM cleanup both
+  pass it. `phonetics.rs` reduces words to a pronunciation skeleton (w and v merge, th becomes
+  t, vowels drop) and scores the distance; `store.rs` holds the learned table.
+- **TWO thresholds, and conflating them was a real bug.** `SUSPECT_MIN_SCORE` (0.74) is for
+  finding a mishearing UNAIDED - high, because a false flag puts a wrong suggestion in front of
+  the model. `LEARN_MIN_SCORE` (0.55) applies when Orel has already corrected the entry and the
+  only question is mishearing-vs-rephrase. Using the suspicion bar for learning made the live
+  case ("comic" -> "commit", 0.62) silently unlearnable.
+- **`phonetics::MIN_LEN` (4) is a real boundary, not a knob.** "the" keys to t and "ze" keys to
+  s; any threshold loose enough to pair them pairs half the lexicon. Function-word accent
+  artifacts belong to the repair PROMPT, which has grammatical context.
+- **Confirmed rules are applied silently, suspects are only offered.** Silently rewriting a
+  rare-but-correct word is worse than leaving a wrong one, so an unconfirmed sound-alike goes
+  into the prompt as "maybe", never into the text.
+- **Vocabulary is built from ACCEPTED output only** (`note_vocab`), never from raw ASR -
+  otherwise the first mishearing joins the vocabulary and starts attracting correct words.
+- **The aligner learns only from `translate`; the mishearing table learns from every mode.**
+  A repair pass is en->en and would key the translation table on English tokens.
+- **`align_substitutions` is an edit script, deliberately.** The first version collected the
+  diverging run with two independent loops and could return deletions paired against nothing -
+  measured, it produced ZERO substitutions for the textbook case and the failure looked like a
+  threshold problem. Do not "simplify" it back.
+- **whisper metrics**: `lang` comes from `full_lang_id_from_state`, `confidence` is the mean
+  per-token probability (whisper-rs does not expose avg_logprob; this carries the same signal).
+  Silence is trimmed BEFORE normalising - silence is where hallucinations are born.
+
+## Non-obvious constraints (v0.4.0 rebrand)
 
 - **The signing identity is STILL `Whissper Local`, on purpose.** TCC keys on bundle id + code
   signature. v0.4.0 already changes the bundle id (`ai.orellius.stt` -> `ai.orellius.ozen`),

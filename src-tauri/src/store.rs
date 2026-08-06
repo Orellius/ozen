@@ -92,8 +92,18 @@ pub struct LogEntry {
     pub speech_ms: u64,
     pub asr_ms: u64,
     pub llm_ms: u64,
-    /// "translate" | "polish" | "raw"
+    /// "translate" | "polish" | "repair" | "raw"
     pub mode: String,
+    /// What whisper decided the clip was ("he" / "en"), and how sure the decoder was
+    /// (mean per-token probability, 0..1). A low number here is the tell that a word was
+    /// guessed - it is the difference between "the output was odd" and knowing WHY.
+    pub lang: String,
+    pub confidence: f32,
+    /// How many learned hints the model was given for this utterance, and how many confirmed
+    /// mishearings were repaired before it ran. Without these the dictionary is unfalsifiable:
+    /// there would be no way to tell whether it is earning its keep or just costing tokens.
+    pub hints_used: usize,
+    pub auto_fixed: usize,
 }
 
 impl Default for LogEntry {
@@ -107,6 +117,10 @@ impl Default for LogEntry {
             asr_ms: 0,
             llm_ms: 0,
             mode: "translate".to_string(),
+            lang: String::new(),
+            confidence: 0.0,
+            hints_used: 0,
+            auto_fixed: 0,
         }
     }
 }
@@ -153,16 +167,60 @@ pub struct Exemplar {
     pub at: u64,
 }
 
-/// What translate.rs injects for one specific Hebrew input.
+/// A word the ASR reliably gets wrong, and what was actually said.
+///
+/// This is the defect class nothing else in the pipeline can see: the transcript is a real
+/// word, spelled correctly, in a grammatical sentence - it is simply the WRONG word ("comic
+/// push" for "commit and push", observed live 2026-08-06). Spell check passes it, the LLM
+/// cleanup passes it, and the only evidence that anything is wrong is that it sounds like
+/// something the speaker actually says.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Mishearing {
+    pub heard: String,
+    pub meant: String,
+    pub hits: u32,
+    /// Confirmed by Orel correcting it. Locked rules are applied SILENTLY; unconfirmed ones
+    /// are only ever offered to the model as a suggestion, because silently rewriting a rare
+    /// but correct word is worse than leaving a wrong one.
+    pub locked: bool,
+    pub last_at: u64,
+}
+
+impl Default for Mishearing {
+    fn default() -> Self {
+        Self {
+            heard: String::new(),
+            meant: String::new(),
+            hits: 0,
+            locked: false,
+            last_at: 0,
+        }
+    }
+}
+
+/// An unconfirmed sound-alike hit found in the current transcript.
+#[derive(Clone, Serialize)]
+pub struct Suspect {
+    pub heard: String,
+    pub meant: String,
+    pub score: f32,
+}
+
+/// What translate.rs injects for one specific input.
 #[derive(Clone, Default, Serialize)]
 pub struct Hints {
     pub terms: Vec<Term>,
     pub exemplars: Vec<Exemplar>,
+    pub suspects: Vec<Suspect>,
 }
 
 impl Hints {
     pub fn is_empty(&self) -> bool {
-        self.terms.is_empty() && self.exemplars.is_empty()
+        self.terms.is_empty() && self.exemplars.is_empty() && self.suspects.is_empty()
+    }
+    pub fn count(&self) -> usize {
+        self.terms.len() + self.exemplars.len() + self.suspects.len()
     }
 }
 
@@ -178,7 +236,44 @@ struct Dictionary {
     /// How many utterances each side appeared in at all - the denominators Dice needs.
     he_seen: HashMap<String, u32>,
     en_seen: HashMap<String, u32>,
+    mishearings: Vec<Mishearing>,
+    /// Every word Orel has been observed to actually use, with a count. This is what a
+    /// suspected mishearing is matched AGAINST - a generic English dictionary would be useless
+    /// here, because the whole question is "which of HIS words does this sound like".
+    vocab: HashMap<String, u32>,
 }
+
+/// Seeds the vocabulary so the very first session can already catch mishearings, before any
+/// corrections exist. Same terms the whisper prompts bias toward - one list, two consumers.
+const SEED_VOCAB: &[&str] = &[
+    "commit", "push", "branch", "merge", "rebase", "repo", "repository", "terminal", "build",
+    "deploy", "debug", "test", "tests", "refactor", "function", "endpoint", "server", "client",
+    "frontend", "backend", "database", "migration", "release", "revert", "stash", "clone",
+    "pull", "request", "review", "compile", "runtime", "package", "import", "export", "module",
+    "component", "config", "schema", "query", "cache", "buffer", "thread", "async", "await",
+    "error", "warning", "logging", "screenshot", "install", "update", "upgrade", "rollback",
+    "rust", "typescript", "python", "swift", "tauri", "react", "cargo", "github", "docker",
+    "ollama", "claude", "whisper", "ozen", "sadna", "studio", "xcode", "keychain", "finder",
+];
+
+/// A rule must be seen this often before it is even worth mentioning to the model.
+const MISHEARING_MIN_HITS: u32 = 2;
+/// Two bars, because two situations with very different evidence:
+///
+/// SUSPECT is the unprompted guess - nobody has told us anything, we are inferring from sound
+/// alone that a correctly-spelled word in a grammatical sentence is the wrong word. A false
+/// positive here puts a wrong suggestion in front of the model, so it is set high.
+///
+/// LEARN applies when Orel has ALREADY given the answer by correcting the entry. The only
+/// question left is whether he fixed a mishearing (generalises to every future utterance) or
+/// rephrased (must never generalise). Distinguishing those two needs a much lower bar than
+/// finding a mishearing unaided - and the live case proves it: "comic" -> "commit" scores
+/// 0.62, well under the suspicion bar, yet it is unmistakably a mishearing.
+const SUSPECT_MIN_SCORE: f32 = 0.74;
+const LEARN_MIN_SCORE: f32 = 0.55;
+/// Vocabulary entries not seen in this long lose half their weight, so an early wrong pairing
+/// fades instead of outranking current usage forever.
+const DECAY_AFTER_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
 pub struct Store {
     dir: PathBuf,
@@ -191,13 +286,16 @@ pub struct Store {
 impl Store {
     pub fn load(dir: PathBuf) -> Self {
         let _ = fs::create_dir_all(&dir);
-        Self {
+        let mut dict: Dictionary = read_json(&dir.join("dictionary.json")).unwrap_or_default();
+        decay(&mut dict);
+        let store = Self {
             settings: Mutex::new(read_json(&dir.join("settings.json")).unwrap_or_default()),
             log: Mutex::new(read_json(&dir.join("log.json")).unwrap_or_default()),
             rejections: Mutex::new(read_json(&dir.join("rejections.json")).unwrap_or_default()),
-            dict: Mutex::new(read_json(&dir.join("dictionary.json")).unwrap_or_default()),
+            dict: Mutex::new(dict),
             dir,
-        }
+        };
+        store
     }
 
     // ---- settings ----
@@ -266,14 +364,24 @@ impl Store {
         };
         entry.corrected = Some(corrected.to_string());
         let hebrew = entry.hebrew.clone();
+        let produced = entry.english.clone();
+        let was_translation = entry.mode == "translate";
         write_json(&self.dir.join("log.json"), &*log);
         drop(log);
 
-        // The exemplar is what carries a correction's weight. It is counted ONCE, deliberately:
-        // replaying one sentence N times is the degenerate input the aligner cannot learn from
-        // (every word in it co-occurs with every other), so stuffing the counter would teach noise.
+        // A correction feeds three different learners, and the split matters:
+        //   - what he MEANT overall  -> an exemplar, retrievable for similar future input
+        //   - which he->en RENDERING -> the aligner, but only for actual translations
+        //   - which words were MISHEARD -> the phonetic table, for every mode
+        // The exemplar is counted ONCE, deliberately: replaying one sentence N times is the
+        // degenerate input the aligner cannot learn from (every word in it co-occurs with every
+        // other), so stuffing the counter would teach noise.
         self.add_exemplar(&hebrew, corrected);
-        self.observe(&hebrew, corrected);
+        if was_translation {
+            self.observe(&hebrew, corrected);
+        }
+        self.learn_mishearings(&produced, corrected);
+        self.note_vocab(corrected);
         true
     }
 
@@ -324,6 +432,140 @@ impl Store {
             }
             write_json(&self.dir.join("dictionary.json"), &*dict);
         }
+    }
+
+    // ---- the mishearing layer ----
+
+    /// Record what this utterance's FINAL text was made of. Vocabulary is built from output
+    /// Orel accepted (or wrote himself), never from raw ASR - otherwise the first mishearing
+    /// enters the vocabulary and starts attracting correct words toward itself.
+    pub fn note_vocab(&self, text: &str) {
+        if let Ok(mut dict) = self.dict.lock() {
+            for w in content_tokens(text) {
+                if w.chars().count() >= crate::phonetics::MIN_LEN {
+                    *dict.vocab.entry(w).or_insert(0) += 1;
+                }
+            }
+            write_json(&self.dir.join("dictionary.json"), &*dict);
+        }
+    }
+
+    /// Words this transcript contains that are not known vocabulary but sound like something
+    /// that is. Offered as suggestions, never applied - see `Mishearing::locked`.
+    pub fn suspects(&self, text: &str) -> Vec<Suspect> {
+        let Ok(dict) = self.dict.lock() else {
+            return Vec::new();
+        };
+        let known = known_words(&dict);
+        let mut out: Vec<Suspect> = Vec::new();
+        for w in content_tokens(text) {
+            if w.chars().count() < crate::phonetics::MIN_LEN || known.contains(&w) {
+                continue;
+            }
+            let best = known
+                .iter()
+                .map(|k| (k.clone(), crate::phonetics::similarity(&w, k)))
+                .filter(|(_, s)| *s >= SUSPECT_MIN_SCORE)
+                .max_by(|a, b| a.1.total_cmp(&b.1));
+            if let Some((meant, score)) = best {
+                if meant != w {
+                    out.push(Suspect { heard: w, meant, score });
+                }
+            }
+        }
+        out.sort_by(|a, b| b.score.total_cmp(&a.score));
+        out.truncate(6);
+        out
+    }
+
+    /// Apply the CONFIRMED rules. These came from Orel fixing the same word himself, so they
+    /// are applied silently and word-boundary-exact - never as a substring replace, which
+    /// would corrupt every word containing the pattern.
+    pub fn apply_known(&self, text: &str) -> (String, usize) {
+        let Ok(dict) = self.dict.lock() else {
+            return (text.to_string(), 0);
+        };
+        let rules: Vec<&Mishearing> = dict.mishearings.iter().filter(|m| m.locked).collect();
+        if rules.is_empty() {
+            return (text.to_string(), 0);
+        }
+        let mut applied = 0usize;
+        let out: String = split_keep(text)
+            .into_iter()
+            .map(|piece| {
+                let bare = piece.trim_matches(|c: char| !c.is_alphanumeric());
+                if bare.is_empty() {
+                    return piece.to_string();
+                }
+                match rules.iter().find(|m| m.heard.eq_ignore_ascii_case(bare)) {
+                    Some(rule) => {
+                        applied += 1;
+                        piece.replacen(bare, &rule.meant, 1)
+                    }
+                    None => piece.to_string(),
+                }
+            })
+            .collect();
+        (out, applied)
+    }
+
+    pub fn mishearings(&self) -> Vec<Mishearing> {
+        let mut v = self
+            .dict
+            .lock()
+            .map(|d| d.mishearings.clone())
+            .unwrap_or_default();
+        v.sort_by(|a, b| b.locked.cmp(&a.locked).then(b.hits.cmp(&a.hits)));
+        v
+    }
+
+    pub fn forget_mishearing(&self, heard: &str) {
+        if let Ok(mut dict) = self.dict.lock() {
+            dict.mishearings.retain(|m| m.heard != heard);
+            write_json(&self.dir.join("dictionary.json"), &*dict);
+        }
+    }
+
+    /// Diff what the model produced against what Orel actually meant, and keep only the
+    /// substitutions that SOUND alike. That filter is the whole design: a word swapped for a
+    /// similar-sounding one is a mishearing and generalises to every future utterance; a word
+    /// swapped for an unrelated one is Orel rephrasing, and generalising from it would corrupt
+    /// later transcripts. Rephrasings are still captured - as exemplars, by `correct`.
+    fn learn_mishearings(&self, produced: &str, corrected: &str) -> usize {
+        let a = content_tokens(produced);
+        let b = content_tokens(corrected);
+        let pairs = align_substitutions(&a, &b);
+        let mut learned = 0usize;
+        if let Ok(mut dict) = self.dict.lock() {
+            for (heard, meant) in pairs {
+                if heard.chars().count() < crate::phonetics::MIN_LEN {
+                    continue;
+                }
+                if crate::phonetics::similarity(&heard, &meant) < LEARN_MIN_SCORE {
+                    continue; // a rephrase, not a mishearing
+                }
+                learned += 1;
+                match dict.mishearings.iter_mut().find(|m| m.heard == heard) {
+                    Some(m) => {
+                        m.meant = meant;
+                        m.hits += 1;
+                        m.locked = true;
+                        m.last_at = now_ms();
+                    }
+                    None => dict.mishearings.push(Mishearing {
+                        heard,
+                        meant,
+                        hits: 1,
+                        locked: true,
+                        last_at: now_ms(),
+                    }),
+                }
+            }
+            if learned > 0 {
+                write_json(&self.dir.join("dictionary.json"), &*dict);
+            }
+        }
+        learned
     }
 
     pub fn glossary(&self) -> Vec<Term> {
@@ -393,8 +635,13 @@ impl Store {
             .take(MAX_EXEMPLARS)
             .map(|(_, x)| x.clone())
             .collect();
+        drop(dict);
 
-        Hints { terms, exemplars }
+        Hints {
+            terms,
+            exemplars,
+            suspects: self.suspects(hebrew),
+        }
     }
 }
 
@@ -480,6 +727,145 @@ fn prune_align(dict: &mut Dictionary) {
         dict.align.remove(&key);
         dict.he_seen.remove(&key);
     }
+}
+
+/// Age the learned tables on load. Without this an early wrong pairing outranks current usage
+/// forever, because nothing ever removes weight - only adds it. Locked entries are exempt:
+/// those are Orel's own corrections and are not guesses that can go stale.
+fn decay(dict: &mut Dictionary) {
+    let now = now_ms();
+    let stale = |last: u64| last > 0 && now.saturating_sub(last) > DECAY_AFTER_MS;
+    for t in dict.terms.iter_mut() {
+        if !t.locked && stale(t.last_at) {
+            t.hits /= 2;
+        }
+    }
+    dict.terms.retain(|t| t.locked || t.hits > 0);
+    for m in dict.mishearings.iter_mut() {
+        if !m.locked && stale(m.last_at) {
+            m.hits /= 2;
+        }
+    }
+    dict.mishearings.retain(|m| m.locked || m.hits > 0);
+}
+
+/// Everything the speaker is known to say: the seed list, learned glossary renderings, and
+/// every word that survived into an accepted output.
+fn known_words(dict: &Dictionary) -> Vec<String> {
+    let mut set: Vec<String> = SEED_VOCAB.iter().map(|s| s.to_string()).collect();
+    for t in &dict.terms {
+        for w in content_tokens(&t.en) {
+            if !set.contains(&w) {
+                set.push(w);
+            }
+        }
+    }
+    for (w, n) in &dict.vocab {
+        // One sighting is not vocabulary - it may itself have been the mishearing.
+        if *n >= MISHEARING_MIN_HITS && !set.contains(w) {
+            set.push(w.clone());
+        }
+    }
+    set
+}
+
+/// Token-level substitutions between two sequences, via an LCS alignment. Runs of unmatched
+/// tokens on both sides are paired positionally; a 1-to-many run also yields the joined form,
+/// so "comic" -> "commit and" is recoverable and not just dropped as a length mismatch.
+fn align_substitutions(a: &[String], b: &[String]) -> Vec<(String, String)> {
+    let (n, m) = (a.len(), b.len());
+    let mut lcs = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            lcs[i][j] = if a[i] == b[j] {
+                lcs[i + 1][j + 1] + 1
+            } else {
+                lcs[i + 1][j].max(lcs[i][j + 1])
+            };
+        }
+    }
+    // Emit a proper edit script first. An earlier version tried to collect the diverging run
+    // on each side with two independent loops, which could advance only one of them and hand
+    // back a run of deletions paired against nothing - measured, it produced zero
+    // substitutions for the textbook case. Deriving deletions and insertions in one pass and
+    // grouping them afterwards removes that whole class of bug.
+    enum Op {
+        Keep,
+        Del(String),
+        Ins(String),
+    }
+    let mut ops: Vec<Op> = Vec::new();
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < n && j < m {
+        if a[i] == b[j] {
+            ops.push(Op::Keep);
+            i += 1;
+            j += 1;
+        } else if lcs[i + 1][j] >= lcs[i][j + 1] {
+            ops.push(Op::Del(a[i].clone()));
+            i += 1;
+        } else {
+            ops.push(Op::Ins(b[j].clone()));
+            j += 1;
+        }
+    }
+    while i < n {
+        ops.push(Op::Del(a[i].clone()));
+        i += 1;
+    }
+    while j < m {
+        ops.push(Op::Ins(b[j].clone()));
+        j += 1;
+    }
+
+    // A substitution is a maximal run of deletions and insertions with no match between them.
+    let mut out = Vec::new();
+    let mut dels: Vec<String> = Vec::new();
+    let mut ins: Vec<String> = Vec::new();
+    let mut flush = |dels: &mut Vec<String>, ins: &mut Vec<String>, out: &mut Vec<(String, String)>| {
+        if !dels.is_empty() && !ins.is_empty() {
+            if dels.len() == 1 {
+                // One word became several: "comic" -> "commit and". Keep the joined form so a
+                // collapsed phrase is recoverable, not discarded as a length mismatch.
+                out.push((dels[0].clone(), ins.join(" ")));
+            } else {
+                for (x, y) in dels.iter().zip(ins.iter()) {
+                    out.push((x.clone(), y.clone()));
+                }
+            }
+        }
+        dels.clear();
+        ins.clear();
+    };
+    for op in ops {
+        match op {
+            Op::Keep => flush(&mut dels, &mut ins, &mut out),
+            Op::Del(w) => dels.push(w),
+            Op::Ins(w) => ins.push(w),
+        }
+    }
+    flush(&mut dels, &mut ins, &mut out);
+    out
+}
+
+/// Split on whitespace but keep the pieces intact, so punctuation attached to a word survives
+/// a rewrite ("comic," -> "commit,").
+fn split_keep(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut last = 0usize;
+    for (idx, c) in text.char_indices() {
+        if c.is_whitespace() {
+            if idx > last {
+                out.push(&text[last..idx]);
+            }
+            out.push(&text[idx..idx + c.len_utf8()]);
+            last = idx + c.len_utf8();
+        }
+    }
+    if last < text.len() {
+        out.push(&text[last..]);
+    }
+    out
 }
 
 /// One vote per token per utterance.
@@ -614,6 +1000,69 @@ mod tests {
         assert!(s.hints_for("תריץ את הטסטים").terms.is_empty());
     }
 
+    /// The live defect this whole layer exists for. "commit and push" came back as "comic
+    /// push" on 2026-08-06; correcting it once must teach the app to fix it silently forever.
+    #[test]
+    fn a_correction_teaches_a_misheard_word() {
+        let s = store();
+        s.append_log(LogEntry {
+            at: 111,
+            hebrew: "תעשה comic push".into(),
+            english: "do a comic push".into(),
+            mode: "translate".into(),
+            ..Default::default()
+        });
+        assert!(s.correct(111, "do a commit and push"));
+
+        let (fixed, applied) = s.apply_known("another comic push please");
+        assert_eq!(applied, 1, "the learned rule did not fire");
+        assert!(fixed.contains("commit"), "got {fixed:?}");
+        assert!(!fixed.contains("comic"), "got {fixed:?}");
+    }
+
+    /// The other direction, and the one that keeps this safe: when Orel REPHRASES rather than
+    /// fixes a mishearing, the words do not sound alike and nothing may be learned. Without
+    /// this filter every edit would become a permanent global find-and-replace.
+    #[test]
+    fn a_rephrase_teaches_nothing() {
+        let s = store();
+        s.append_log(LogEntry {
+            at: 222,
+            hebrew: "תבדוק".into(),
+            english: "check the server logs".into(),
+            mode: "translate".into(),
+            ..Default::default()
+        });
+        assert!(s.correct(222, "check the database logs"));
+
+        assert!(
+            s.mishearings().is_empty(),
+            "learned a rule from a rephrase: {:?}",
+            s.mishearings().iter().map(|m| (&m.heard, &m.meant)).collect::<Vec<_>>()
+        );
+        let (text, applied) = s.apply_known("restart the server now");
+        assert_eq!(applied, 0);
+        assert!(text.contains("server"), "a rephrase must not rewrite later text");
+    }
+
+    /// Punctuation must survive a silent rewrite, and only whole words may match - a substring
+    /// replace would corrupt every word that happens to contain the pattern.
+    #[test]
+    fn rewrites_respect_word_boundaries_and_punctuation() {
+        let s = store();
+        s.append_log(LogEntry {
+            at: 333,
+            hebrew: "x".into(),
+            english: "run the tesst".into(),
+            mode: "translate".into(),
+            ..Default::default()
+        });
+        assert!(s.correct(333, "run the tests"));
+        let (fixed, n) = s.apply_known("run the tesst, then deploy");
+        assert_eq!(n, 1);
+        assert!(fixed.contains("tests,"), "punctuation lost: {fixed:?}");
+    }
+
     /// Orel's word outranks the counter: a locked term survives contradicting observations.
     #[test]
     fn a_locked_term_is_never_overwritten_by_the_aligner() {
@@ -626,3 +1075,4 @@ mod tests {
         assert_eq!(t[0].en, "repository", "locked term must win");
     }
 }
+

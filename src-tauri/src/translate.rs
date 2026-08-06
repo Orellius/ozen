@@ -121,6 +121,20 @@ fn hint_block(hints: &Hints, target: &str) -> String {
             out.push_str(&format!("  {} = {}\n", flatten(&t.he), flatten(&t.en)));
         }
     }
+    if !hints.suspects.is_empty() {
+        // Suspected mishearings are OFFERED, never applied. The app found a word that is not in
+        // this speaker's vocabulary but sounds like one that is; only the sentence can settle
+        // whether that is a mishearing or a genuinely rare word, and the model is the thing
+        // holding the sentence. Confirmed rules never reach here - they were already applied.
+        out.push_str(
+            "Words below may be speech-recognition errors: each was heard as the first form \
+             but sounds like the second, which this speaker uses often. Substitute ONLY where \
+             the sentence clearly means the second; otherwise keep what was heard:\n",
+        );
+        for s in &hints.suspects {
+            out.push_str(&format!("  heard \"{}\" -> maybe \"{}\"\n", flatten(&s.heard), flatten(&s.meant)));
+        }
+    }
     if !hints.exemplars.is_empty() {
         out.push_str("Previous outputs this speaker approved for similar input:\n");
         for x in &hints.exemplars {

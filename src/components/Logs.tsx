@@ -53,6 +53,13 @@ function Card({ entry, onCorrected, onToast }: CardProps) {
   const meta = [fmtTime(entry.at), fmtDuration(entry.speech_ms)];
   if (entry.asr_ms > 0) meta.push(`ASR ${fmtMs(entry.asr_ms)}`);
   if (entry.llm_ms > 0) meta.push(`LLM ${fmtMs(entry.llm_ms)}`);
+  if (entry.lang) meta.push(entry.lang);
+  // Decoder confidence is only worth surfacing when it is BAD - a number beside every line
+  // becomes wallpaper, and the point is to make a guessed word stand out.
+  if (entry.confidence > 0 && entry.confidence < 0.6)
+    meta.push(`ביטחון ${Math.round(entry.confidence * 100)}%`);
+  if (entry.auto_fixed > 0) meta.push(`תוקנו ${entry.auto_fixed}`);
+  if (entry.hints_used > 0) meta.push(`${entry.hints_used} רמזים`);
   if (entry.corrected) meta.push("תוקן");
 
   // The correction editor is this app's only source of supervised truth, so it is one click

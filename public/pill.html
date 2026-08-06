@@ -18,8 +18,8 @@
   :root {
     /* One source of truth for the tile geometry: the window is 72x72 and lib.rs clips the
        vibrancy material to this same radius. Change one, change both. */
-    --size: 72px;
-    --radius: 16px;
+    --size: 104px;
+    --radius: 23px;
   }
   html, body {
     margin: 0;
@@ -74,7 +74,7 @@
       if (e.buttons === 1) getCurrentWindow().startDragging();
     });
 
-    const SIZE = 72;
+    const SIZE = 104;
     const canvas = document.getElementById("eq");
     const DPR = window.devicePixelRatio || 2;
     canvas.width = SIZE * DPR;
@@ -154,6 +154,15 @@
     }
 
     let t = 0;
+    // Random-walk state: current position, velocity, and the current random destination.
+    let px = C;
+    let py = C;
+    let vx = 0;
+    let vy = 0;
+    let tx = C;
+    let ty = C;
+    let nextRetarget = 0;
+
     function frame() {
       const target = STATES[mode] || STATES.idle;
       // Ease every property toward the active state. 0.07 is slow enough to see the change
@@ -175,15 +184,36 @@
       t += 0.016 * (0.6 + shown.speed);
       ctx.clearRect(0, 0, SIZE, SIZE);
 
-      // Slow Lissajous wander: the light is never parked dead-centre, which is what stops it
-      // looking like a logo and starts it looking like something inhabiting the tile.
-      const amp = shown.drift * (0.55 + 0.45 * (mode === "recording" ? loudness : 1));
-      const cx = C + Math.sin(t * 0.53) * amp + Math.sin(t * 0.19) * amp * 0.4;
-      const cy = C + Math.cos(t * 0.41) * amp * 0.85 + Math.cos(t * 0.23) * amp * 0.35;
+      // Unpredictable wander. A Lissajous path (what this used to be) is periodic, so after a
+      // few seconds the eye has learned it and the orb reads as a looping animation rather
+      // than as something alive. Instead it picks a random destination at random intervals and
+      // is pulled toward it by a spring - the motion is smooth and continuous but the next
+      // position is genuinely not derivable from the previous ones.
+      if (t >= nextRetarget) {
+        const reach = SIZE * 0.055 * (0.4 + shown.drift * 0.16);
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * reach; // sqrt keeps the picks area-uniform
+        tx = C + Math.cos(a) * r;
+        ty = C + Math.sin(a) * r;
+        nextRetarget = t + 0.35 + Math.random() * 1.6;
+      }
+      // Spring toward the target, with damping. Stiffness rises with energy, so speech makes
+      // it dart while idle makes it drift.
+      const stiff = 0.010 + 0.020 * shown.energy;
+      vx = (vx + (tx - px) * stiff) * 0.90;
+      vy = (vy + (ty - py) * stiff) * 0.90;
+      px += vx;
+      py += vy;
+      const cx = px;
+      const cy = py;
 
-      const breathe = 1 + 0.05 * Math.sin(t * 1.1);
+      // Size IS the volume readout: quiet speech shrinks it, a loud syllable swells it. The
+      // ceiling is 80% of the tile (his spec), the floor keeps it clearly visible at rest.
       const drive = mode === "recording" ? loudness : 1;
-      const radius = 15 * breathe * (0.72 + 0.34 * shown.energy * drive);
+      const breathe = 1 + 0.04 * Math.sin(t * 1.1);
+      const MAX_R = SIZE * 0.40; // 80% of the tile, as a diameter
+      const span = mode === "recording" ? 0.52 + 0.48 * loudness : 0.78;
+      const radius = MAX_R * span * breathe;
       const wob = 0.1 + 0.2 * shown.energy * (0.45 + 0.55 * drive);
 
       // Outer halo: the light spilling onto the glass while something is happening. Skipped

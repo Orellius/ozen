@@ -43,7 +43,7 @@ impl WhisperEngine {
         samples: &[f32],
         language: &str,
         initial_prompt: &str,
-    ) -> Result<String, String> {
+    ) -> Result<Transcript, String> {
         let ctx = self
             .ctx
             .lock()
@@ -82,15 +82,23 @@ impl WhisperEngine {
         params.set_temperature(0.0);
         params.set_no_speech_thold(0.6);
 
-        // Peak-normalize before decode: the raw cpal path has no AGC (the old Electron
-        // pipeline got Chrome's autoGainControl for free), and a quiet mic starves whisper.
-        let samples = normalize_peak(samples);
+        // Trim leading/trailing silence BEFORE normalising: silence is where whisper invents
+        // its stock phrases, so removing the habitat beats filtering the output. Peak-normalize
+        // after, because the raw cpal path has no AGC (the old Electron pipeline got Chrome's
+        // autoGainControl for free) and a quiet mic starves whisper.
+        let trimmed = trim_silence(samples);
+        let samples = normalize_peak(trimmed);
 
         state
             .full(params, &samples)
             .map_err(|e| format!("whisper inference failed: {e}"))?;
 
         let mut text = String::new();
+        // Mean token probability across kept segments. whisper-rs does not expose avg_logprob,
+        // but per-token probability carries the same information: a low mean means the decoder
+        // was guessing, which is the signature of a misheard word or an invented one.
+        let mut prob_sum = 0.0f64;
+        let mut prob_n = 0usize;
         for i in 0..state.full_n_segments() {
             let Some(segment) = state.get_segment(i) else {
                 continue;
@@ -98,13 +106,78 @@ impl WhisperEngine {
             if segment.no_speech_probability() > NO_SPEECH_MAX {
                 continue; // silence/noise segment - whisper would hallucinate here
             }
+            for k in 0..segment.n_tokens() {
+                if let Some(tok) = segment.get_token(k) {
+                    prob_sum += tok.token_probability() as f64;
+                    prob_n += 1;
+                }
+            }
             let piece = segment
                 .to_str_lossy()
                 .map_err(|e| format!("segment {i} read failed: {e}"))?;
             text.push_str(&piece);
         }
-        Ok(text.trim().to_string())
+
+        let lang_id = state.full_lang_id_from_state();
+        Ok(Transcript {
+            text: text.trim().to_string(),
+            lang: whisper_rs::get_lang_str(lang_id)
+                .unwrap_or("??")
+                .to_string(),
+            confidence: if prob_n > 0 {
+                (prob_sum / prob_n as f64) as f32
+            } else {
+                0.0
+            },
+        })
     }
+}
+
+/// One decode, with the two numbers that say how much to trust it.
+pub struct Transcript {
+    pub text: String,
+    /// What whisper decided the clip was, e.g. "he" or "en". In auto mode this is the only
+    /// place the decision is visible at all - without it a misdetected clip silently gets the
+    /// wrong downstream repair and there is no way to find out why the output was odd.
+    pub lang: String,
+    /// Mean per-token probability, 0..1. Low means the decoder was guessing.
+    pub confidence: f32,
+}
+
+/// Drop leading and trailing near-silence, keeping a short pad so word onsets survive.
+///
+/// The threshold is derived from the clip's own quietest stretch rather than being a constant:
+/// a fixed floor either eats speech in a quiet room or keeps noise in a loud one, and the whole
+/// point is to work in both.
+fn trim_silence(samples: &[f32]) -> &[f32] {
+    const WIN: usize = 320; // 20ms at 16k
+    const PAD_WINDOWS: usize = 5; // 100ms of context kept on each side
+    if samples.len() < WIN * 4 {
+        return samples;
+    }
+    let energies: Vec<f32> = samples
+        .chunks(WIN)
+        .map(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt())
+        .collect();
+    let peak = energies.iter().fold(0.0f32, |m, e| m.max(*e));
+    let floor = energies.iter().fold(f32::MAX, |m, e| m.min(*e));
+    if peak <= 0.0 {
+        return samples;
+    }
+    // Speech is anything meaningfully above the quietest window, but never below an absolute
+    // floor - otherwise a clip of pure silence "finds speech" in its own noise.
+    let thold = (floor + (peak - floor) * 0.12).max(0.006);
+    let first = energies.iter().position(|e| *e > thold);
+    let last = energies.iter().rposition(|e| *e > thold);
+    let (Some(first), Some(last)) = (first, last) else {
+        return samples;
+    };
+    let start = first.saturating_sub(PAD_WINDOWS) * WIN;
+    let end = ((last + PAD_WINDOWS + 1) * WIN).min(samples.len());
+    if end <= start {
+        return samples;
+    }
+    &samples[start..end]
 }
 
 /// Scale the clip so its peak sits at ~0.95 - a poor man's AGC for the raw cpal path.

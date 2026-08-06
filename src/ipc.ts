@@ -42,6 +42,21 @@ export interface LogEntry {
   asr_ms: number;
   llm_ms: number;
   mode: OutputMode;
+  /** What whisper decided the clip was, and how sure the decoder was (0..1). */
+  lang: string;
+  confidence: number;
+  /** How much the learned dictionary contributed - hints given, mishearings auto-repaired. */
+  hints_used: number;
+  auto_fixed: number;
+}
+
+/** store.rs :: Mishearing - a word the ASR reliably gets wrong, and what was meant. */
+export interface Mishearing {
+  heard: string;
+  meant: string;
+  hits: number;
+  locked: boolean;
+  last_at: number;
 }
 
 /** store.rs :: Rejection */
@@ -69,6 +84,7 @@ export interface Snapshot {
   logs: LogEntry[];
   rejections: Rejection[];
   glossary: Term[];
+  mishearings: Mishearing[];
 }
 
 export const cmd = {
@@ -82,6 +98,8 @@ export const cmd = {
     invoke("correct_entry", { at, corrected }),
   setTerm: (he: string, en: string): Promise<void> => invoke("set_term", { he, en }),
   forgetTerm: (he: string): Promise<void> => invoke("forget_term", { he }),
+  forgetMishearing: (heard: string): Promise<void> =>
+    invoke("forget_mishearing", { heard }),
   clearLogs: (): Promise<void> => invoke("clear_logs"),
   requestAccessibility: (): Promise<boolean> => invoke("request_accessibility"),
   requestMicrophone: (): Promise<void> => invoke("request_microphone"),
@@ -96,6 +114,7 @@ export interface Events {
   "model-ready": boolean;
   settings: Settings;
   glossary: Term[];
+  mishearings: Mishearing[];
   "needs-accessibility": string;
 }
 
