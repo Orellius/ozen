@@ -192,6 +192,11 @@ fn chat(system: &str, user: &str, input: &str, model: &str) -> Result<String, St
     let body = json!({
         "model": model,
         "stream": false,
+        // KEEP THE MODEL HOT. Ollama unloads an idle model after ~5 minutes by default, so a
+        // pre-warm at startup buys exactly one fast dictation and every later one pays the cold
+        // load again - which is felt as "sometimes it just hangs for ten seconds". This is the
+        // half of pre-warming that actually holds.
+        "keep_alive": "30m",
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": user }

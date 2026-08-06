@@ -12,6 +12,7 @@
 
 mod audio;
 mod hotkey;
+mod lexicon;
 mod paste;
 mod phonetics;
 mod sound;
@@ -568,11 +569,20 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         set_tray(&app, TrayState::Translating);
         st.cue(Cue::Working);
         // The learned dictionary, narrowed to the terms this sentence actually contains.
-        let hints = if cfg.dictionary {
+        let mut hints = if cfg.dictionary {
             st.store.hints_for(&hebrew)
         } else {
             Hints::default()
         };
+        // The researched lexicon goes in UNDER the learned terms: slang whose literal
+        // translation is wrong, and dev vocabulary the transcript wrote in Hebrew letters. His
+        // own corrections outrank it on collision - a table is a prior, a correction is a fact -
+        // so anything already present from the learned dictionary is left alone.
+        for lex in lexicon::hints_for(&hebrew) {
+            if !hints.terms.iter().any(|t| t.he == lex.he) {
+                hints.terms.push(lex);
+            }
+        }
         hints_used = hints.count();
         let llm_start = Instant::now();
         let result = if spoke_english {
