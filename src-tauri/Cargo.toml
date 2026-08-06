@@ -1,6 +1,6 @@
 [package]
 name = "ozen"
-version = "0.5.0"
+version = "0.5.1"
 description = "Hebrew speech to coherent English, pasted into the focused app"
 authors = ["Orellius"]
 edition = "2021"
