@@ -646,6 +646,84 @@ impl Store {
 }
 
 /// Promote every aligned pair that now clears both bars. Locked terms are never touched.
+
+/// A promoted pair must be TERMINOLOGY, never grammar. Measured 2026-08-06: the aligner had
+/// promoted 67 pairs and 64 of them were ordinary Hebrew - `רוצה -> want`, `צריך -> need`,
+/// `למה -> why` - which the translator already knows perfectly well, plus outright wrong ones
+/// (`שזה -> their`, `בעברית -> write`, `עושה -> doesn't`). One of them, `לעשות -> system`,
+/// is causally traceable to a corrupted paste: "we can system... use the instructional buttons".
+/// Orel's own correction named the shape of the bug - לעשות is "to do", a VERB, and "system" is
+/// מערכת, a NOUN. The aligner promoted a verb as if it were a term.
+///
+/// Two independent filters, because each one alone lets the other's cases through:
+const MAX_TERM_SHARE: f32 = 0.15;
+
+/// A token appearing in a large share of everything the speaker says is part of how he TALKS,
+/// not part of what he talks about. Terminology is comparatively rare and consistent: `טרמינל`
+/// appeared in 3 utterances, `רוצה` in 30.
+///
+/// The denominator is the MOST FREQUENT token's count, not the utterance count - the aligner
+/// table never stored how many utterances it has seen, and inventing that number would be worse
+/// than normalising against the busiest word, which tracks it closely enough to separate 3 from 30.
+fn is_common_speech(he: &str, dict: &Dictionary, total: f32) -> bool {
+    if total < 20.0 {
+        return false; // too little history for the frequency signal to mean anything yet
+    }
+    dict.he_seen.get(he).copied().unwrap_or(0) as f32 / total > MAX_TERM_SHARE
+}
+
+/// Hebrew marks its verbs morphologically at the FRONT of the word, which is exactly what makes
+/// this checkable without a tagger: an infinitive opens with ל, and the prefix conjugation opens
+/// with א/ת/י/נ. That catches `לעשות`, `לראות`, `להמשיך`, `להשתמש`, `תעשה`, `תגיד`, `תפתח` -
+/// every verb in the promoted set - while leaving borrowed nouns alone, because a transliterated
+/// term does not carry Hebrew verbal morphology.
+///
+/// EXCEPTION, and it is the reason this is not a blunt prefix test: real terms DO begin with
+/// those letters (`טרמינל` does not, but `למבדה`/lambda does, and ל is also the preposition "to"
+/// glued onto a borrowed noun). So a token is spared when the lexicon knows it as a term.
+fn looks_verbal(he: &str) -> bool {
+    let ch: Vec<char> = he.chars().collect();
+    if ch.len() < 4 {
+        return false;
+    }
+    match ch[0] {
+        'ל' => ch.len() >= 5,           // infinitive: לעשות, להשתמש
+        'ת' | 'י' | 'נ' | 'א' => ch.len() >= 4 && ch.len() <= 6, // תעשה, תגיד, נראה
+        _ => false,
+    }
+}
+
+/// The third filter, and the one the other two structurally cannot do: some grammar is invisible
+/// on the Hebrew side. `בעברית -> write`, `שוב -> again`, `ממש -> really`, `עשית -> did` all
+/// survived the frequency and morphology gates, and none of them is a term. What gives them away
+/// is the ENGLISH side: terminology renders to a domain noun, grammar renders to a closed-class
+/// word or a bare common verb.
+///
+/// This list is deliberately small and boring. It is not a dictionary of English - it is the
+/// closed class plus the handful of verbs that showed up in the measured failure set. Anything
+/// not on it is allowed through, because the cost of a missing term is one weaker prompt and the
+/// cost of a wrong forced rendering is a corrupted paste.
+const EN_GRAMMAR: &[&str] = &[
+    "a", "an", "the", "and", "or", "but", "if", "so", "then", "than", "as", "at", "by", "for",
+    "from", "in", "into", "of", "on", "onto", "to", "with", "within", "without", "about",
+    "again", "also", "any", "all", "already", "always", "another", "because", "before", "after",
+    "between", "both", "even", "ever", "every", "here", "there", "how", "what", "when", "where",
+    "which", "who", "why", "instead", "itself", "just", "like", "maybe", "more", "most", "much",
+    "never", "now", "only", "other", "others", "our", "out", "outside", "over", "really", "same",
+    "second", "side", "since", "some", "something", "still", "such", "that", "their", "them",
+    "themselves", "these", "they", "thing", "things", "this", "those", "through", "too", "under",
+    "up", "very", "we", "well", "what", "while", "you", "your", "terms", "example", "addition",
+    "be", "been", "being", "can", "come", "continue", "did", "do", "does", "done", "feel", "get",
+    "give", "go", "had", "has", "have", "is", "keep", "know", "let", "look", "looks", "make",
+    "made", "need", "open", "put", "said", "say", "see", "seen", "should", "take", "tell", "think",
+    "use", "used", "want", "was", "were", "will", "would", "write", "wrote", "okay", "great",
+];
+
+fn is_english_grammar(en: &str) -> bool {
+    let w = en.trim().to_lowercase();
+    !w.contains(' ') && EN_GRAMMAR.contains(&w.as_str())
+}
+
 fn promote(dict: &mut Dictionary) {
     let candidates: Vec<(String, String, u32)> = dict
         .align
@@ -654,7 +732,14 @@ fn promote(dict: &mut Dictionary) {
             let he_n = *dict.he_seen.get(he)? as f32;
             let (en, hits, dice, margin) = best_pair(row, &dict.en_seen, he_n)?;
             // A word that renders as itself teaches the model nothing.
-            (hits >= MIN_HITS && dice >= MIN_DICE && margin >= MIN_MARGIN && &en != he)
+            let total = dict.he_seen.values().copied().max().unwrap_or(0) as f32;
+            (hits >= MIN_HITS
+                && dice >= MIN_DICE
+                && margin >= MIN_MARGIN
+                && &en != he
+                && !is_common_speech(he, dict, total)
+                && !looks_verbal(he)
+                && !is_english_grammar(&en))
                 .then(|| (he.clone(), en, hits))
         })
         .collect();
@@ -1073,6 +1158,49 @@ mod tests {
         }
         let t = s.hints_for("תפתח ריפו").terms;
         assert_eq!(t[0].en, "repository", "locked term must win");
+    }
+
+    /// The live failure, from his own dictionary on 2026-08-06, and his own correction of it:
+    /// לעשות is "to do" (a VERB) and "system" is מערכת (a NOUN). The aligner had promoted the
+    /// verb as terminology, and the wrong rendering reached a real paste.
+    #[test]
+    fn verbs_are_never_promoted_as_terminology() {
+        for verb in ["לעשות", "להשתמש", "לראות", "תעשה", "תגיד", "תפתח"] {
+            assert!(looks_verbal(verb), "{verb} should read as verbal morphology");
+        }
+    }
+
+    /// The other direction, which is the half that makes the gate a gate rather than a wall:
+    /// borrowed terminology must survive it.
+    #[test]
+    fn borrowed_terms_survive_the_verb_filter() {
+        for term in ["טרמינל", "קפיברה", "ריפו", "בראנץ", "קומיט"] {
+            assert!(!looks_verbal(term), "{term} must not read as a verb");
+        }
+    }
+
+    /// Frequency: a word used in a third of everything he says is grammar. One used three times
+    /// in ninety is a term.
+    #[test]
+    fn common_speech_is_rejected_and_rare_terms_kept() {
+        let mut dict = Dictionary::default();
+        dict.he_seen.insert("רוצה".into(), 30);
+        dict.he_seen.insert("טרמינל".into(), 3);
+        assert!(is_common_speech("רוצה", &dict, 30.0));
+        assert!(!is_common_speech("טרמינל", &dict, 30.0));
+        // Under twenty observations the signal is noise, and the gate says so rather than guessing.
+        assert!(!is_common_speech("רוצה", &dict, 12.0));
+    }
+
+    /// The cases that walked through both Hebrew-side filters and are still not terminology.
+    #[test]
+    fn english_grammar_renderings_are_rejected() {
+        for en in ["write", "again", "really", "did", "things", "any", "terms", "instead"] {
+            assert!(is_english_grammar(en), "{en} should be rejected as grammar");
+        }
+        for en in ["terminal", "capybara", "mockup", "commit", "repository", "endpoint"] {
+            assert!(!is_english_grammar(en), "{en} is a term and must survive");
+        }
     }
 }
 
