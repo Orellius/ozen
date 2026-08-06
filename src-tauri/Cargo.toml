@@ -1,6 +1,6 @@
 [package]
 name = "orellius-stt"
-version = "0.1.0"
+version = "0.3.0"
 description = "Hebrew speech to coherent English, pasted into the focused app"
 authors = ["Orellius"]
 edition = "2021"

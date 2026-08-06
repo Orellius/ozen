@@ -1,10 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Orellius STT",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "identifier": "ai.orellius.stt",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -13,10 +16,10 @@
       {
         "label": "main",
         "title": "Orellius STT",
-        "width": 480,
-        "height": 720,
-        "minWidth": 380,
-        "minHeight": 480,
+        "width": 560,
+        "height": 760,
+        "minWidth": 440,
+        "minHeight": 520,
         "visible": false,
         "resizable": true
       },

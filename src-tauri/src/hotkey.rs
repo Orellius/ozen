@@ -1,19 +1,28 @@
-//! hotkey.rs: a global push-to-talk hotkey via a CGEventTap, firing on key/modifier press + release.
+//! hotkey.rs: a global hotkey via a CGEventTap, reporting press and release as separate edges
+//!   and classifying each release as a clean TAP or not.
 //! Public surface: is_accessibility_trusted(), request_accessibility(), install_hotkey(key, on_press, on_release).
-//! Why this file (vs tauri-plugin-global-shortcut): push-to-talk needs SEPARATE press and release edges
-//!   (hold to record, release to send); the global-shortcut plugin models discrete triggers, not hold.
+//! Why this file (vs tauri-plugin-global-shortcut): hold-to-talk needs SEPARATE press and release
+//!   edges, which the global-shortcut plugin does not model; toggle-to-talk additionally needs to know
+//!   whether the key was TAPPED alone. Right-Command is still a real modifier - without that
+//!   distinction, pressing Right-⌘+C to copy would toggle recording on. So the tap tracks every other
+//!   KeyDown while our key is held and reports `clean_tap = released alone, inside TAP_WINDOW_MS`.
 //!   Ported from the old Electron native-core (napi callbacks swapped for plain Rust closures).
-//! NOT responsible for: what happens on press/release (the caller wires recording + the pipeline).
-//! Test strategy: with Accessibility granted, install on "cmd_r"; hold/release Right-Command; assert
-//!   on_press then on_release fire exactly once each.
+//! NOT responsible for: what happens on those edges (the caller wires recording + the pipeline).
+//! Test strategy: with Accessibility granted, install on "cmd_r". Tap Right-⌘ alone -> on_release(true).
+//!   Hold it a second -> on_release(false). Press Right-⌘+C -> on_release(false). All three must hold,
+//!   or toggle mode eats the user's copy shortcut.
 
 use std::ffi::c_void;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Longer than this and it was a hold, not a tap. 400ms is above a deliberate tap and well
+/// below the time it takes to reach for a second key in a shortcut.
+const TAP_WINDOW_MS: u64 = 400;
 
 use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
@@ -88,18 +97,22 @@ pub fn request_accessibility() -> bool {
     }
 }
 
+/// `on_release` receives `clean_tap`: true when our key went down and up alone, inside the tap
+/// window. Hold mode ignores it; toggle mode acts only when it is true.
 pub fn install_hotkey<P, R>(key: &str, on_press: P, on_release: R) -> Result<(), String>
 where
     P: Fn() + Send + 'static,
-    R: Fn() + Send + 'static,
+    R: Fn(bool) + Send + 'static,
 {
     if !is_accessibility_trusted() {
         return Err("Accessibility permission required (System Settings -> Privacy & Security -> Accessibility).".to_string());
     }
 
     let cfg = config_for(key).ok_or_else(|| format!("unknown hotkey: {key}"))?;
+    // KeyDown is always observed, even for a modifier hotkey: it is how we learn that our key
+    // was part of a shortcut rather than a tap.
     let event_types = match cfg.kind {
-        HotkeyKind::Modifier(_) => vec![CGEventType::FlagsChanged],
+        HotkeyKind::Modifier(_) => vec![CGEventType::FlagsChanged, CGEventType::KeyDown],
         HotkeyKind::Key => vec![CGEventType::KeyDown, CGEventType::KeyUp],
     };
     log(&format!("install_hotkey key={key} keycode={:#x}", cfg.keycode));
@@ -109,6 +122,11 @@ where
         let port_holder_cb = port_holder.clone();
         let pressed: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
         let pressed_cb = pressed.clone();
+        // Set when any OTHER key goes down while ours is held - that release is a shortcut, not a tap.
+        let combo: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+        let combo_cb = combo.clone();
+        let down_at: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+        let down_at_cb = down_at.clone();
 
         let cb = move |_proxy: CGEventTapProxy, etype: CGEventType, event: &CGEvent| -> CallbackResult {
             if matches!(
@@ -124,29 +142,46 @@ where
             }
             let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
             if keycode != cfg.keycode {
+                // Someone else's key. Only interesting as evidence that ours is in a combo.
+                if matches!(etype, CGEventType::KeyDown) && pressed_cb.load(Ordering::SeqCst) {
+                    combo_cb.store(true, Ordering::SeqCst);
+                }
                 return CallbackResult::Keep;
             }
+
+            let press = || {
+                combo_cb.store(false, Ordering::SeqCst);
+                down_at_cb.store(now_ms(), Ordering::SeqCst);
+                log("press");
+                on_press();
+            };
+            // A release is a clean tap only if nothing else was pressed meanwhile AND it was quick.
+            let release = || {
+                let held = now_ms().saturating_sub(down_at_cb.load(Ordering::SeqCst));
+                let clean = !combo_cb.load(Ordering::SeqCst) && held <= TAP_WINDOW_MS;
+                log(&format!("release held={held}ms clean_tap={clean}"));
+                on_release(clean);
+            };
+
             match (cfg.kind, etype) {
                 (HotkeyKind::Modifier(bit), CGEventType::FlagsChanged) => {
                     let flags = event.get_flags().bits();
                     let now_pressed = (flags & bit) != 0;
                     let was_pressed = pressed_cb.swap(now_pressed, Ordering::SeqCst);
                     if now_pressed && !was_pressed {
-                        log("press");
-                        on_press();
+                        press();
                     } else if !now_pressed && was_pressed {
-                        log("release");
-                        on_release();
+                        release();
                     }
                 }
                 (HotkeyKind::Key, CGEventType::KeyDown) => {
                     if !pressed_cb.swap(true, Ordering::SeqCst) {
-                        on_press();
+                        press();
                     }
                 }
                 (HotkeyKind::Key, CGEventType::KeyUp) => {
                     if pressed_cb.swap(false, Ordering::SeqCst) {
-                        on_release();
+                        release();
                     }
                 }
                 _ => {}
@@ -185,6 +220,13 @@ where
     });
 
     Ok(())
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn log(msg: &str) {

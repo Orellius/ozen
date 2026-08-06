@@ -1,22 +1,26 @@
-//! lib.rs: wires the menu-bar push-to-talk loop and the dashboard commands.
+//! lib.rs: wires the menu-bar dictation loop and the dashboard commands.
 //! Public surface: run() (the Tauri entry point).
 //! Why this file: it is the imperative shell - it owns the tray, the global hotkey, app state, and the
-//!   orchestration (hold -> record -> transcribe Hebrew -> translate to English -> paste). The heavy,
-//!   testable pieces live in audio/whisper/translate/paste/hotkey; this file only sequences them.
-//! NOT responsible for: audio capture, ASR, translation, pasting, or hotkey mechanics.
-//! Test strategy: launch, hold the hotkey, speak Hebrew, release; assert English lands in the focused
-//!   app, the tray cycles idle->recording->transcribing->idle, and the dashboard shows the pair.
+//!   orchestration (arm -> record -> transcribe Hebrew -> translate to English -> paste -> learn). The
+//!   heavy, testable pieces live in audio/whisper/translate/paste/hotkey/sound/store; this file only
+//!   sequences them and decides when each audio cue fires.
+//! NOT responsible for: audio capture, ASR, translation, pasting, hotkey mechanics, cue synthesis, or
+//!   persistence.
+//! Test strategy: launch, tap the hotkey, speak Hebrew, tap again; assert English lands in the focused
+//!   app, five cues fire in order, the tray cycles idle->recording->transcribing->idle, and the entry
+//!   survives a restart.
 
 mod audio;
 mod hotkey;
 mod paste;
+mod sound;
+mod store;
 mod translate;
 mod whisper;
 
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -24,10 +28,11 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 use audio::AudioHandle;
+use sound::{Cue, SoundHandle};
+use store::{Hints, LogEntry, Rejection, Settings, Store, Term};
 use whisper::WhisperEngine;
 
 const DEFAULT_MODEL: &str = "hf.co/dicta-il/DictaLM-3.0-Nemotron-12B-Instruct-GGUF:Q6_K";
-const DEFAULT_HOTKEY: &str = "cmd_r";
 /// The Hebrew "pre-warm": an extensive initial prompt biasing whisper toward Orel's actual
 /// speech register - everyday Hebrew dev-speak with English tech terms in Latin script.
 /// Whisper conditions on STYLE, so this is written as natural example speech, not a word
@@ -43,7 +48,7 @@ Claude. דוגמאות: יאללה, תעשה commit ותדחוף ל-branch. סב
 נבדוק למה ה-server מחזיר שגיאה על ה-endpoint.";
 const MIN_SAMPLES: usize = 1600; // ~0.1s at 16k; shorter is a fat-finger, not speech.
 const RMS_FLOOR: f32 = 0.012; // below this the clip is silence/room noise.
-const HISTORY_CAP: usize = 30;
+const SAMPLE_RATE: f32 = 16_000.0;
 
 // Whisper model is large; load it once, lazily, behind a OnceLock (preloaded at startup in a thread).
 static ENGINE: OnceLock<Result<WhisperEngine, String>> = OnceLock::new();
@@ -51,23 +56,25 @@ fn whisper_engine() -> &'static Result<WhisperEngine, String> {
     ENGINE.get_or_init(WhisperEngine::load)
 }
 
-#[derive(Clone, Serialize)]
-struct Entry {
-    hebrew: String,
-    english: String,
-    at: u64,
-}
-
 struct AppState {
     audio: AudioHandle,
+    sound: SoundHandle,
+    store: Arc<Store>,
     recording: AtomicBool,
     processing: AtomicBool,
-    translate_enabled: AtomicBool,
-    polish_enabled: AtomicBool,
+    /// Wall-clock ms when the current recording armed - drives the toggle-mode runaway cap.
+    armed_at: AtomicU64,
     ollama_model: String,
-    hotkey: String,
     whisper_prompt: String,
-    history: Mutex<VecDeque<Entry>>,
+}
+
+impl AppState {
+    fn settings(&self) -> Settings {
+        self.store.settings()
+    }
+    fn cue(&self, cue: Cue) {
+        self.sound.play(cue);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -83,11 +90,12 @@ enum TrayState {
 struct Snapshot {
     recording: bool,
     processing: bool,
-    translate_enabled: bool,
     model_ready: bool,
-    hotkey: String,
     model: String,
-    history: Vec<Entry>,
+    settings: Settings,
+    logs: Vec<LogEntry>,
+    rejections: Vec<Rejection>,
+    glossary: Vec<Term>,
 }
 
 fn now_ms() -> u64 {
@@ -144,7 +152,9 @@ fn set_tray(app: &AppHandle, s: TrayState) {
     let _ = app.emit("state", state_str);
 }
 
-fn emit_error(app: &AppHandle, msg: &str) {
+fn emit_error(app: &AppHandle, st: &Arc<AppState>, msg: &str, reason: &str) {
+    st.store.note_rejection(reason, now_ms());
+    st.cue(Cue::Error);
     let _ = app.emit("error", msg.to_string());
 }
 
@@ -201,7 +211,29 @@ fn position_pill(pill: &tauri::WebviewWindow) {
     let _ = pill.set_position(tauri::LogicalPosition::new(x, y));
 }
 
+// ---- the two hotkey edges, dispatched by input mode ----
+
+/// Hold mode records for exactly as long as the key is down. Toggle mode ignores the press
+/// entirely and acts on a clean tap instead, so Right-⌘ keeps working as a modifier.
 fn on_press(app: &AppHandle, st: &Arc<AppState>) {
+    if st.settings().input_mode == "hold" {
+        start_recording(app, st);
+    }
+}
+
+fn on_release(app: &AppHandle, st: &Arc<AppState>, clean_tap: bool) {
+    if st.settings().input_mode == "hold" {
+        stop_recording(app, st);
+    } else if clean_tap {
+        if st.recording.load(Ordering::SeqCst) {
+            stop_recording(app, st);
+        } else {
+            start_recording(app, st);
+        }
+    }
+}
+
+fn start_recording(app: &AppHandle, st: &Arc<AppState>) {
     if st.processing.load(Ordering::SeqCst) {
         return;
     }
@@ -209,26 +241,38 @@ fn on_press(app: &AppHandle, st: &Arc<AppState>) {
         return; // already recording
     }
     st.audio.start();
+    st.cue(Cue::Start);
+    st.armed_at.store(now_ms(), Ordering::SeqCst);
     set_tray(app, TrayState::Recording);
 
-    // Feed the pill's equalizer: ~30Hz live mic level for as long as the hold lasts.
+    // Feed the pill's equalizer at ~30Hz, and enforce the runaway cap from the same loop: in
+    // toggle mode nothing else will ever stop a recording the user forgot about.
+    let deadline_ms = st.settings().max_seconds.max(10) * 1000;
     let app = app.clone();
     let st = st.clone();
     std::thread::spawn(move || {
         while st.recording.load(Ordering::SeqCst) {
             let _ = app.emit("level", st.audio.level());
+            let elapsed = now_ms().saturating_sub(st.armed_at.load(Ordering::SeqCst));
+            if elapsed >= deadline_ms {
+                let _ = app.emit("error", "הגיע לזמן ההקלטה המרבי - נעצר".to_string());
+                stop_recording(&app, &st);
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_millis(33));
         }
         let _ = app.emit("level", 0.0f32);
     });
 }
 
-fn on_release(app: &AppHandle, st: &Arc<AppState>) {
+fn stop_recording(app: &AppHandle, st: &Arc<AppState>) {
     if !st.recording.swap(false, Ordering::SeqCst) {
         return; // wasn't recording
     }
     st.processing.store(true, Ordering::SeqCst);
     let samples = st.audio.stop();
+    // Cue AFTER the stream is closed, so the tone can never bleed into the captured clip.
+    st.cue(Cue::Stop);
     let app = app.clone();
     let st = st.clone();
     std::thread::spawn(move || run_pipeline(app, st, samples));
@@ -239,58 +283,76 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         st.processing.store(false, Ordering::SeqCst);
         set_tray(app, TrayState::Idle);
     };
+    let speech_ms = (samples.len() as f32 / SAMPLE_RATE * 1000.0) as u64;
 
     if samples.len() < MIN_SAMPLES {
-        emit_error(&app, "קצר מדי, נסה שוב");
+        emit_error(&app, &st, "קצר מדי, נסה שוב", "short");
         finish(&app, &st);
         return;
     }
     if rms(&samples) < RMS_FLOOR {
-        emit_error(&app, "לא נשמע דיבור");
+        emit_error(&app, &st, "לא נשמע דיבור", "silent");
         finish(&app, &st);
         return;
     }
 
     set_tray(&app, TrayState::Transcribing);
+    let asr_start = Instant::now();
     let hebrew = match whisper_engine() {
         Ok(engine) => match engine.transcribe(&samples, "he", &st.whisper_prompt) {
             Ok(t) => t,
             Err(e) => {
-                emit_error(&app, &format!("תמלול נכשל: {e}"));
+                emit_error(&app, &st, &format!("תמלול נכשל: {e}"), "asr");
                 set_tray(&app, TrayState::Error);
                 finish(&app, &st);
                 return;
             }
         },
         Err(e) => {
-            emit_error(&app, &format!("טעינת מודל נכשלה: {e}"));
+            emit_error(&app, &st, &format!("טעינת מודל נכשלה: {e}"), "asr");
             set_tray(&app, TrayState::Error);
             finish(&app, &st);
             return;
         }
     };
+    let asr_ms = asr_start.elapsed().as_millis() as u64;
     let hebrew = clean_transcript(&hebrew);
     if hebrew.is_empty() {
-        emit_error(&app, "לא זוהה טקסט");
+        emit_error(&app, &st, "לא זוהה טקסט", "empty");
         finish(&app, &st);
         return;
     }
 
-    let translate_on = st.translate_enabled.load(Ordering::SeqCst);
-    let english = if translate_on || st.polish_enabled.load(Ordering::SeqCst) {
+    let cfg = st.settings();
+    let mut llm_ms = 0u64;
+    let mut mode = "raw";
+    let english = if cfg.translate || cfg.polish {
         set_tray(&app, TrayState::Translating);
-        let result = if translate_on {
-            translate::to_english(&hebrew, &st.ollama_model)
+        st.cue(Cue::Working);
+        // The learned dictionary, narrowed to the terms this sentence actually contains.
+        let hints = if cfg.dictionary {
+            st.store.hints_for(&hebrew)
+        } else {
+            Hints::default()
+        };
+        let llm_start = Instant::now();
+        let result = if cfg.translate {
+            mode = "translate";
+            translate::to_english(&hebrew, &st.ollama_model, &hints)
         } else {
             // Hebrew-out mode: same model cleans the transcript instead of translating it.
-            translate::polish_hebrew(&hebrew, &st.ollama_model)
+            mode = "polish";
+            translate::polish_hebrew(&hebrew, &st.ollama_model, &hints)
         };
+        llm_ms = llm_start.elapsed().as_millis() as u64;
         match result {
             Ok(t) if !t.is_empty() => t,
             Ok(_) => hebrew.clone(),
             Err(e) => {
                 // Don't strand the user: fall back to pasting the raw Hebrew, but tell them why.
-                emit_error(&app, &format!("עיבוד נכשל (הודבק עברית גולמית): {e}"));
+                st.store.note_rejection("llm", now_ms());
+                let _ = app.emit("error", format!("עיבוד נכשל (הודבק עברית גולמית): {e}"));
+                mode = "raw";
                 hebrew.clone()
             }
         }
@@ -298,47 +360,112 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         hebrew.clone()
     };
 
-    if let Err(e) = paste::paste_text(&english) {
-        emit_error(&app, &format!("הדבקה נכשלה: {e}"));
+    let pasted = paste::paste_text(&english);
+    if let Err(e) = &pasted {
+        emit_error(&app, &st, &format!("הדבקה נכשלה: {e}"), "paste");
     }
 
-    let entry = Entry {
-        hebrew,
-        english,
+    let entry = LogEntry {
         at: now_ms(),
+        hebrew: hebrew.clone(),
+        english: english.clone(),
+        corrected: None,
+        speech_ms,
+        asr_ms,
+        llm_ms,
+        mode: mode.to_string(),
     };
-    if let Ok(mut h) = st.history.lock() {
-        h.push_front(entry.clone());
-        while h.len() > HISTORY_CAP {
-            h.pop_back();
-        }
+    st.store.append_log(entry.clone());
+    // Every produced pair feeds the aligner. It stays silent until a pairing repeats, so a
+    // single bad translation cannot teach the dictionary anything (store.rs MIN_HITS).
+    if cfg.dictionary && mode == "translate" {
+        st.store.observe(&hebrew, &english);
+    }
+    if pasted.is_ok() {
+        st.cue(Cue::Done);
     }
     let _ = app.emit("result", entry);
     finish(&app, &st);
 }
 
+// ---- dashboard commands ----
+
 #[tauri::command]
 fn get_state(state: State<'_, Arc<AppState>>) -> Snapshot {
-    let history = state
-        .history
-        .lock()
-        .map(|h| h.iter().cloned().collect())
-        .unwrap_or_default();
     Snapshot {
         recording: state.recording.load(Ordering::SeqCst),
         processing: state.processing.load(Ordering::SeqCst),
-        translate_enabled: state.translate_enabled.load(Ordering::SeqCst),
         model_ready: ENGINE.get().map(|r| r.is_ok()).unwrap_or(false),
-        hotkey: state.hotkey.clone(),
         model: state.ollama_model.clone(),
-        history,
+        settings: state.settings(),
+        logs: state.store.logs(),
+        rejections: state.store.rejections(),
+        glossary: state.store.glossary(),
     }
 }
 
 #[tauri::command]
+fn save_settings(app: AppHandle, state: State<'_, Arc<AppState>>, settings: Settings) {
+    state.sound.set_enabled(settings.sounds);
+    state.sound.set_volume(settings.sound_volume);
+    state.store.save_settings(settings.clone());
+    let _ = app.emit("settings", settings);
+}
+
+/// Kept as its own command because the tray menu and the pill both flip only this one flag.
+#[tauri::command]
 fn set_translate(app: AppHandle, state: State<'_, Arc<AppState>>, enabled: bool) {
-    state.translate_enabled.store(enabled, Ordering::SeqCst);
-    let _ = app.emit("translate", enabled);
+    let mut cfg = state.settings();
+    cfg.translate = enabled;
+    state.store.save_settings(cfg.clone());
+    let _ = app.emit("settings", cfg);
+}
+
+#[tauri::command]
+fn preview_sound(state: State<'_, Arc<AppState>>, cue: String) {
+    let cue = match cue.as_str() {
+        "start" => Cue::Start,
+        "stop" => Cue::Stop,
+        "working" => Cue::Working,
+        "error" => Cue::Error,
+        _ => Cue::Done,
+    };
+    // Preview must be audible even while cues are switched off - it is how you decide.
+    state.sound.set_enabled(true);
+    state.sound.play(cue);
+    state.sound.set_enabled(state.settings().sounds);
+}
+
+/// Orel rewrote a translation. This is the only ground truth the dictionary ever gets.
+#[tauri::command]
+fn correct_entry(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    at: u64,
+    corrected: String,
+) -> bool {
+    let ok = state.store.correct(at, corrected.trim());
+    if ok {
+        let _ = app.emit("glossary", state.store.glossary());
+    }
+    ok
+}
+
+#[tauri::command]
+fn set_term(app: AppHandle, state: State<'_, Arc<AppState>>, he: String, en: String) {
+    state.store.set_term(he.trim(), en.trim());
+    let _ = app.emit("glossary", state.store.glossary());
+}
+
+#[tauri::command]
+fn forget_term(app: AppHandle, state: State<'_, Arc<AppState>>, he: String) {
+    state.store.forget_term(he.trim());
+    let _ = app.emit("glossary", state.store.glossary());
+}
+
+#[tauri::command]
+fn clear_logs(state: State<'_, Arc<AppState>>) {
+    state.store.clear_logs();
 }
 
 #[tauri::command]
@@ -363,31 +490,16 @@ fn show_dashboard(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
-    let hk = std::env::var("ORELLIUS_STT_HOTKEY").unwrap_or_else(|_| DEFAULT_HOTKEY.to_string());
-    let prompt = std::env::var("ORELLIUS_STT_PROMPT")
-        .unwrap_or_else(|_| DEFAULT_WHISPER_PROMPT.to_string());
-
-    let state = Arc::new(AppState {
-        audio: AudioHandle::spawn(),
-        recording: AtomicBool::new(false),
-        processing: AtomicBool::new(false),
-        translate_enabled: AtomicBool::new(true),
-        // Hebrew-out polish (DictaLM cleanup when translate is off). ORELLIUS_STT_POLISH=0 disables.
-        polish_enabled: AtomicBool::new(
-            std::env::var("ORELLIUS_STT_POLISH").map_or(true, |v| v != "0"),
-        ),
-        ollama_model: model,
-        hotkey: hk,
-        whisper_prompt: prompt,
-        history: Mutex::new(VecDeque::new()),
-    });
-
     tauri::Builder::default()
-        .manage(state.clone())
         .invoke_handler(tauri::generate_handler![
             get_state,
+            save_settings,
             set_translate,
+            preview_sound,
+            correct_entry,
+            set_term,
+            forget_term,
+            clear_logs,
             request_accessibility,
             request_microphone
         ])
@@ -402,32 +514,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            let state = build_state(app)?;
+            app.manage(state.clone());
             build_tray(app)?;
-
-            // Wire the global push-to-talk hotkey to the record/pipeline loop.
-            let handle = app.handle().clone();
-            let st = state.clone();
-            let press = {
-                let h = handle.clone();
-                let s = st.clone();
-                move || on_press(&h, &s)
-            };
-            let release = {
-                let h = handle.clone();
-                let s = st.clone();
-                move || on_release(&h, &s)
-            };
-            if let Err(e) = hotkey::install_hotkey(&state.hotkey, press, release) {
-                // First run before Accessibility is granted: prompt and tell the dashboard.
-                hotkey::request_accessibility();
-                let h = handle.clone();
-                let msg = e.clone();
-                // Emit a touch later so the webview has a listener attached.
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
-                    let _ = h.emit("needs-accessibility", msg);
-                });
-            }
+            wire_hotkey(app, &state);
 
             // The pill is permanent: show it once the webview is up.
             let h = app.handle().clone();
@@ -436,7 +526,7 @@ pub fn run() {
                 show_pill(&h);
             });
 
-            // Preload the whisper model so the first push-to-talk isn't a multi-second stall.
+            // Preload the whisper model so the first dictation isn't a multi-second stall.
             let h = app.handle().clone();
             std::thread::spawn(move || {
                 let ok = whisper_engine().is_ok();
@@ -447,7 +537,7 @@ pub fn run() {
             // load exactly when the user is waiting for their first paste.
             let model = state.ollama_model.clone();
             std::thread::spawn(move || {
-                if let Err(e) = translate::to_english("בדיקה", &model) {
+                if let Err(e) = translate::to_english("בדיקה", &model, &Hints::default()) {
                     eprintln!("[warm] dictalm pre-warm failed (first paste will be slow): {e}");
                 }
             });
@@ -456,6 +546,62 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Build app state around the on-disk store. Env vars still win where they exist, so a debug
+/// launch can override the model or the whisper prompt without touching saved settings.
+fn build_state(app: &tauri::App) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
+    let dir = app.path().app_data_dir()?;
+    let store = Arc::new(Store::load(dir));
+
+    // A hotkey passed by env is a one-off override; persist it so the dashboard shows the truth.
+    if let Ok(hk) = std::env::var("ORELLIUS_STT_HOTKEY") {
+        let mut cfg = store.settings();
+        cfg.hotkey = hk;
+        store.save_settings(cfg);
+    }
+    if let Ok(v) = std::env::var("ORELLIUS_STT_POLISH") {
+        let mut cfg = store.settings();
+        cfg.polish = v != "0";
+        store.save_settings(cfg);
+    }
+
+    let cfg = store.settings();
+    Ok(Arc::new(AppState {
+        audio: AudioHandle::spawn(),
+        sound: SoundHandle::spawn(cfg.sounds, cfg.sound_volume),
+        store,
+        recording: AtomicBool::new(false),
+        processing: AtomicBool::new(false),
+        armed_at: AtomicU64::new(0),
+        ollama_model: std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string()),
+        whisper_prompt: std::env::var("ORELLIUS_STT_PROMPT")
+            .unwrap_or_else(|_| DEFAULT_WHISPER_PROMPT.to_string()),
+    }))
+}
+
+fn wire_hotkey(app: &tauri::App, state: &Arc<AppState>) {
+    let handle = app.handle().clone();
+    let press = {
+        let h = handle.clone();
+        let s = state.clone();
+        move || on_press(&h, &s)
+    };
+    let release = {
+        let h = handle.clone();
+        let s = state.clone();
+        move |clean_tap: bool| on_release(&h, &s, clean_tap)
+    };
+    let Err(e) = hotkey::install_hotkey(&state.settings().hotkey, press, release) else {
+        return;
+    };
+    // First run before Accessibility is granted: prompt and tell the dashboard.
+    hotkey::request_accessibility();
+    // Emit a touch later so the webview has a listener attached.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let _ = handle.emit("needs-accessibility", e);
+    });
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
@@ -492,9 +638,10 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             "quit" => app.exit(0),
             "translate" => {
                 if let Some(st) = app.try_state::<Arc<AppState>>() {
-                    let next = !st.translate_enabled.load(Ordering::SeqCst);
-                    st.translate_enabled.store(next, Ordering::SeqCst);
-                    let _ = app.emit("translate", next);
+                    let mut cfg = st.settings();
+                    cfg.translate = !cfg.translate;
+                    st.store.save_settings(cfg.clone());
+                    let _ = app.emit("settings", cfg);
                 }
             }
             _ => {}

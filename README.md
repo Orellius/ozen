@@ -1,6 +1,6 @@
 # orellius-stt (repo: Orellius/whissper)
 
-Hold a key, speak Hebrew, release - polished **Hebrew** or coherent **English** lands in
+Tap a key, speak Hebrew, tap again - polished **Hebrew** or coherent **English** lands in
 whatever app is focused (your terminal running Claude Code, an editor, a chat box). A
 menu-bar tool, fully on-device. Revival of the old Electron "Whissper" app, rebuilt on
 Tauri 2 with a native (non-webview) audio path and a 2026 model stack. The repo is named
@@ -9,12 +9,17 @@ Tauri 2 with a native (non-webview) audio path and a 2026 model stack. The repo 
 ## The loop
 
 ```
-hold Right-⌘  ->  cpal mic capture (16k mono)  ->  whisper (ivrit-ai, he)
-   ->  clean (drop whisper's silence hallucinations)  ->  DictaLM 3.0 (he -> en, local)
+tap Right-⌘  ->  cpal mic capture (16k mono)  ->  whisper (ivrit-ai, he)
+   ->  clean (drop whisper's silence hallucinations)
+   ->  DictaLM 3.0 (he -> en, local) + learned term hints
    ->  clipboard + synthetic Cmd+V into the focused app
+   ->  log the pair, count it toward the dictionary
 ```
 
 Everything runs locally. No audio leaves the machine.
+
+Each stage boundary also plays a short **cue tone**, so the loop can be followed by ear
+while you are looking at the terminal rather than at the orb.
 
 ## Stack
 
@@ -26,7 +31,9 @@ Everything runs locally. No audio leaves the machine.
 | STT | `whisper-rs` + Metal + `ivrit-ai/whisper-large-v3-turbo-ggml` (`he`) |
 | Translate | local **DictaLM 3.0 Nemotron 12B Instruct** via Ollama (`he -> en`) |
 | Paste | `arboard` clipboard (save/restore) + `CGEvent` Cmd+V |
-| Dashboard | vanilla HTML/JS, Hebrew RTL, event-driven (status, history, settings) |
+| Cues | synthesized sine motifs through a persistent `cpal` output stream (`sound.rs`) |
+| Memory | JSON store: settings, utterance log, learned dictionary (`store.rs`) |
+| Dashboard | React 19 + TypeScript strict + Vite, Hebrew RTL, three tabs |
 
 ## Why this pipeline (2026 research)
 
@@ -64,12 +71,12 @@ in `src-tauri/.cargo/config.toml`: ggml's `@available` checks emit
 `MACOSX_DEPLOYMENT_TARGET=13.0` and links Apple's compiler-rt explicitly. Don't delete
 either line, and refresh the compiler-rt path on Xcode major bumps.
 
-While you hold the hotkey, an **always-on-top capsule** floats top-center - pulsing red
+An **always-on-top orb** floats top-center (draggable) - pulsing red on the real mic level
 while recording, then מתמלל/מתרגם, then a green flash of what was pasted. It never takes
 focus, so the paste always lands in your app.
 
-The app lives in the menu bar (aleph icon); left-click opens
-the dashboard, right-click for the menu. Hold **Right-⌘**, speak Hebrew, release.
+The app lives in the menu bar (aleph icon); left-click opens the dashboard, right-click for
+the menu. Tap **Right-⌘**, speak Hebrew, tap again.
 
 First record loads the whisper model (a few seconds, once). DictaLM's first call pays a
 ~5s cold load, then translations are ~1-2s.
@@ -78,7 +85,7 @@ First record loads the whisper model (a few seconds, once). DictaLM's first call
 
 | Var | Default | Purpose |
 |---|---|---|
-| `ORELLIUS_STT_HOTKEY` | `cmd_r` | `cmd_r` / `ctrl` / `f5` / `f6` |
+| `ORELLIUS_STT_HOTKEY` | `cmd_r` | `cmd_r` / `ctrl` / `f5` / `f6`; overrides the saved setting |
 | `OLLAMA_MODEL` | `hf.co/dicta-il/DictaLM-3.0-Nemotron-12B-Instruct-GGUF:Q6_K` | translator + Hebrew polish |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint |
 | `WHISPER_MODEL_PATH` | HF cache auto-resolve | ivrit GGML override |
@@ -100,9 +107,41 @@ First record loads the whisper model (a few seconds, once). DictaLM's first call
 - Translate OFF now pastes **polished Hebrew**: DictaLM fixes ASR errors, adds punctuation,
   and restores transliterated tech terms (קומיט -> commit). `ORELLIUS_STT_POLISH=0` for raw.
 
+## v0.3.0 - toggle, cues, and the learning dictionary
+
+**Toggle mode is the default.** Tap the hotkey to start, tap again to stop and paste. Hold
+mode (the original push-to-talk) is still there in Settings. Because Right-⌘ is also a real
+modifier, the event tap classifies each release: a toggle fires only on a *clean tap* - the
+key went down and up alone, inside 400ms. Press Right-⌘+C and it stays a copy. A recording
+you forget about auto-stops (default 180s, configurable).
+
+**Cue tones.** Five motifs - start (rising), stop (single note), translating (quiet tick),
+pasted (rising resolve), error (the only falling one). Volume and on/off in Settings, with
+preview buttons.
+
+**The dictionary learns itself.** The bottleneck is the Hebrew -> English step, not the ASR,
+so every produced pair is counted into a co-occurrence table. A Hebrew token's rendering is
+promoted to a forced hint only when it clears three bars: seen at least 3 times, a Dice
+coefficient over 0.55, and a real *margin* over the runner-up. That last bar is the one that
+matters - inside a single sentence every Hebrew word co-occurs with every English word
+equally, so repetition alone can never separate them (there is a test pinning exactly this).
+Promoted terms are injected, scoped to the sentence being translated, as a reference table.
+
+Correcting an entry in the **יומן** tab is the supervised half: the corrected text is stored
+as a locked term and as a retrievable exemplar, and similar future inputs get it back as a
+worked example. Nothing you correct is ever overwritten by the counter.
+
+**Statistics** on the home tab, all derived from the log (never stored as aggregates):
+utterances, cumulative speech time, words/minute, words per utterance, letters per word,
+median ASR and LLM latency - plus a quality block: expansion ratio (English words per Hebrew
+word - a sagging ratio means dropped content), correction rate, and rejections broken down by
+reason (short / silent / no text / ASR / LLM / paste).
+
+Everything persists to `~/Library/Application Support/ai.orellius.stt/`.
+
 ## Roadmap (not built yet)
 
 - Editable preview HUD before paste (eyeball/edit the English first).
-- Configurable hotkey + translate toggle persisted to disk.
 - Optional cloud fallback (Gemini/Soniox/ElevenLabs Scribe) behind a toggle for max fluency.
 - VAD trim (Silero via ort) to cut leading/trailing silence before the whisper encode.
+- Orb position + size persistence.
