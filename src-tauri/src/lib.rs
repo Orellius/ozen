@@ -65,6 +65,10 @@ const DEFAULT_AUTO_PROMPT: &str = "הכתבה של מפתח ישראלי, עבר
 באנגלית. Dictation by an Israeli developer, Hebrew or English, with English technical terms: \
 commit, push, branch, build, deploy, debug, test, refactor, function, endpoint, API, server, \
 Rust, TypeScript, Tauri, React, bun, cargo, git, GitHub, Docker, macOS, Ollama, Claude.";
+/// Corner radius of the orb tile. MUST equal `--radius` in `public/pill.html`: this clips the
+/// glass material, that clips the light drawn over it, and a mismatch leaves tile corners with
+/// no glass in them (which reads as a flat dark square, not as a wrong colour).
+const PILL_RADIUS: f64 = 16.0;
 const MIN_SAMPLES: usize = 1600; // ~0.1s at 16k; shorter is a fat-finger, not speech.
 const RMS_FLOOR: f32 = 0.012; // below this the clip is silence/room noise.
 const SAMPLE_RATE: f32 = 16_000.0;
@@ -268,9 +272,15 @@ fn show_pill_on_main(app: &AppHandle) {
         return;
     };
     position_pill(&pill);
-    // The Dock-style glass: a real NSVisualEffectView clipped to a circle (radius = half
-    // the 72px window). CSS backdrop-filter on a transparent Tauri window paints a square
-    // halo - measured 2026-08-06 - so the material lives at the window layer instead.
+    // The Dock-style glass: a real NSVisualEffectView clipped to the SAME squircle radius the
+    // page uses (`--radius` in pill.html). CSS backdrop-filter on a transparent Tauri window
+    // paints a square halo - measured 2026-08-06 - so the material lives at the window layer.
+    //
+    // These two radii must agree. They did not in the first 0.4.0 build: the material was
+    // still clipped to 36 (half of 72 - the radius that makes a CIRCLE, left over from the
+    // round orb) while the page drew a 16px squircle over it. The visible result is a tile
+    // whose corners contain no glass at all, which reads as flat and dark rather than as a
+    // Dock tile, and it is easy to misread as "the material is wrong" instead of "the mask is".
     //
     // Two details are what make it read as Dock rather than as a grey disc:
     // - `Popover` is the milky menu/popover glass. `HudWindow` (used until 0.3.0) is the flat
@@ -284,7 +294,7 @@ fn show_pill_on_main(app: &AppHandle) {
         &pill,
         window_vibrancy::NSVisualEffectMaterial::Popover,
         Some(window_vibrancy::NSVisualEffectState::Active),
-        Some(36.0),
+        Some(PILL_RADIUS),
     ) {
         eprintln!("[pill] vibrancy failed: {e}");
     }

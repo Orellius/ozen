@@ -86,13 +86,16 @@
 
     // Each state is a light, not a colour swatch: `core` is the hot centre, `rim` the falloff,
     // `energy` how hard the blob is driven, `drift` how far it wanders from centre.
+    // `glow` is the light SPILLING onto the glass, and it is deliberately 0 at idle. Painting
+    // it at idle fills the whole tile with a haze of the rim colour, so the orb sits in a navy
+    // wash instead of floating in clear glass. The spill belongs to activity, not to presence.
     const STATES = {
-      idle:         { core: [200, 218, 255], rim: [120, 150, 220], energy: 0.16, drift: 2.2, speed: 0.30 },
-      recording:    { core: [255, 214, 202], rim: [255,  69,  58], energy: 1.00, drift: 5.0, speed: 1.15 },
-      transcribing: { core: [255, 240, 190], rim: [255, 214,  10], energy: 0.52, drift: 4.0, speed: 0.95 },
-      translating:  { core: [206, 244, 255], rim: [100, 210, 255], energy: 0.52, drift: 4.0, speed: 0.95 },
-      done:         { core: [214, 255, 224], rim: [ 48, 209,  88], energy: 0.70, drift: 2.0, speed: 0.55 },
-      error:        { core: [255, 205, 200], rim: [255,  69,  58], energy: 0.85, drift: 1.5, speed: 1.30 },
+      idle:         { core: [200, 218, 255], rim: [120, 150, 220], energy: 0.16, drift: 2.2, speed: 0.30, glow: 0.00 },
+      recording:    { core: [255, 214, 202], rim: [255,  69,  58], energy: 1.00, drift: 5.0, speed: 1.15, glow: 0.55 },
+      transcribing: { core: [255, 240, 190], rim: [255, 214,  10], energy: 0.52, drift: 4.0, speed: 0.95, glow: 0.30 },
+      translating:  { core: [206, 244, 255], rim: [100, 210, 255], energy: 0.52, drift: 4.0, speed: 0.95, glow: 0.30 },
+      done:         { core: [214, 255, 224], rim: [ 48, 209,  88], energy: 0.70, drift: 2.0, speed: 0.55, glow: 0.45 },
+      error:        { core: [255, 205, 200], rim: [255,  69,  58], energy: 0.85, drift: 1.5, speed: 1.30, glow: 0.45 },
     };
 
     let mode = "idle";
@@ -106,6 +109,7 @@
       energy: 0.16,
       drift: 2.2,
       speed: 0.3,
+      glow: 0.0,
     };
     let loudness = 0;
 
@@ -161,6 +165,7 @@
       shown.energy = lerp(shown.energy, target.energy, 0.07);
       shown.drift = lerp(shown.drift, target.drift, 0.07);
       shown.speed = lerp(shown.speed, target.speed, 0.07);
+      shown.glow = lerp(shown.glow, target.glow, 0.07);
 
       // Mic level is spiky; ease it too, asymmetrically - fast attack so a syllable registers,
       // slow release so the orb keeps glowing through the gaps between words.
@@ -181,15 +186,18 @@
       const radius = 15 * breathe * (0.72 + 0.34 * shown.energy * drive);
       const wob = 0.1 + 0.2 * shown.energy * (0.45 + 0.55 * drive);
 
-      // Outer halo: the light spilling onto the glass. Drawn first and softly, so the blur
-      // belongs to the material rather than sitting on top of it.
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.filter = "blur(6px)";
-      ctx.fillStyle = rgba(shown.rim, 0.3 + 0.28 * drive);
-      blobPath(cx, cy, radius * 1.22, wob * 0.8, t * 0.8, 0.0);
-      ctx.fill();
-      ctx.restore();
+      // Outer halo: the light spilling onto the glass while something is happening. Skipped
+      // entirely once it fades out, so at rest the glass stays clear and the orb floats.
+      const spill = shown.glow * (mode === "recording" ? 0.35 + 0.65 * drive : 1);
+      if (spill > 0.02) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.filter = "blur(6px)";
+        ctx.fillStyle = rgba(shown.rim, 0.42 * spill);
+        blobPath(cx, cy, radius * 1.16, wob * 0.8, t * 0.8, 0.0);
+        ctx.fill();
+        ctx.restore();
+      }
 
       // The body. The gradient origin is offset up-left from the blob centre, so the highlight
       // sits where a light source above-left would put it and the form reads as three
