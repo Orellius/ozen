@@ -4,12 +4,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cmd, on, type PipelineState, type Settings, type Snapshot } from "./ipc";
 import { Home } from "./components/Home";
+import { Review } from "./components/Review";
 import { Logs } from "./components/Logs";
 import { SettingsPage } from "./components/SettingsPage";
 
-type Tab = "home" | "logs" | "settings";
+type Tab = "review" | "home" | "logs" | "settings";
 
+// Review is FIRST and default: it is the only surface that produces ground truth, and a
+// correction queue nobody lands on is a correction queue nobody uses (measured - `corrected`
+// was null on all 92 logged utterances).
 const TABS: { id: Tab; label: string }[] = [
+  { id: "review", label: "בדיקה" },
   { id: "home", label: "בית" },
   { id: "logs", label: "יומן" },
   { id: "settings", label: "הגדרות" },
@@ -52,7 +57,7 @@ interface Toast {
 }
 
 export function App() {
-  const [tab, setTab] = useState<Tab>("home");
+  const [tab, setTab] = useState<Tab>("review");
   const [snap, setSnap] = useState<Snapshot>(EMPTY);
   const [state, setState] = useState<PipelineState>("idle");
   const [toast, setToast] = useState<Toast | null>(null);
@@ -148,6 +153,15 @@ export function App() {
       ) : null}
 
       <div className="page">
+        {tab === "review" ? (
+          <Review
+            logs={snap.logs}
+            glossary={snap.glossary}
+            mishearings={snap.mishearings}
+            onCorrected={onCorrected}
+            onToast={showToast}
+          />
+        ) : null}
         {tab === "home" ? (
           <Home
             settings={snap.settings}

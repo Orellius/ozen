@@ -449,3 +449,33 @@ kbd {
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
   max-width: 90%;
 }
+
+/* ---- Review: the correction queue ------------------------------------------------------- */
+/* Sized so one utterance fills the view. Two side by side would invite skimming, and skimming
+   is what produced a log with 92 entries and zero corrections. */
+.review-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.review-card {
+  border: 1px solid var(--line, #232830); border-radius: 12px;
+  padding: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.review-card .he { direction: rtl; font-size: 16px; line-height: 1.5; }
+.review-en {
+  width: 100%; min-height: 92px; resize: vertical;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line, #232830); border-radius: 9px;
+  color: inherit; font: inherit; font-size: 15px; line-height: 1.5; padding: 10px 12px;
+}
+.review-en:focus { outline: none; border-color: #6ea8ff; background: rgba(110, 168, 255, 0.06); }
+.taught {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 12px; padding: 9px 11px; border-radius: 9px;
+  background: rgba(82, 209, 164, 0.08); border: 1px solid rgba(82, 209, 164, 0.25);
+}
+.taught .chip {
+  padding: 2px 8px; border-radius: 6px; font-size: 12px;
+  background: rgba(255, 255, 255, 0.07); direction: rtl;
+}
+.btn.primary { background: #6ea8ff; color: #06101f; border-color: transparent; font-weight: 600; }
