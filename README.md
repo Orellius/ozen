@@ -1,3 +1,21 @@
+<p align="center">
+  <img src="src-tauri/icons/icon.png" width="128" alt="Ozen" />
+</p>
+
+<h1 align="center">Ozen</h1>
+
+<p align="center">
+  אוזן - "ear". Hold a key, speak Hebrew, release. On-device.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
+  <img alt="Platform: macOS arm64" src="https://img.shields.io/badge/platform-macOS%20arm64-lightgrey.svg">
+  <img alt="On-device" src="https://img.shields.io/badge/inference-on--device-brightgreen.svg">
+</p>
+
+---
+
 # Ozen (אוזן - "ear") · repo `Orellius/ozen`
 
 Tap a key, speak Hebrew, tap again - polished **Hebrew** or coherent **English** lands in
