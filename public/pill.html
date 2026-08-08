@@ -7,11 +7,21 @@
      square halo, measured 2026-08-06. This page is fully transparent and contributes only
      the tile's edge treatment plus what is drawn on the canvas.
 
+     WHAT CHANGED IN 0.7.0 (Orel's call, 2026-08-08):
+     - The capybara is gone. The character is a paperclip assistant, drawn from a reference Orel
+       supplied after two attempts from memory came out wrong the same way twice. He has no limbs,
+       so posture, eyes and brows do all the acting - see drawClippy for the tells that matter.
+     - A GAG REEL of 19 idle animations fires at random, roughly once every 25 to 70 seconds of
+       idling and NEVER during real work. The point is novelty decay: a fixed joke dies from
+       repetition, and this thing is seen dozens of times a day.
+     - MIC LEVEL no longer has a mouth to drive (a paperclip has none). It survives in the halo
+       and in the menu-bar meter, which is why the halo must not be removed.
+
      WHAT CHANGED IN 0.6.0 (Orel's call, 2026-08-06):
-     - The synapse web is gone. There is a capybara, and its MOUTH IS THE MIC LEVEL, so the
-       question the indicator exists to answer ("are you hearing me?") is answered by the first
+     - The synapse web is gone; a character replaced it, and its MOUTH WAS THE MIC LEVEL, so the
+       question the indicator exists to answer ("are you hearing me?") was answered by the first
        thing the eye lands on rather than by a colour the user has to learn.
-     - The character REACTS per stage: ears up and leaning in while listening, pad and pen out
+     - The character REACTS per stage: leaning in while listening, pad and pen out
        and writing while transcribing, pen tapping while translating, page handed over on paste.
      - A STEPS DRAWER opens while a clip is in flight: hear - transcribe - translate - deliver,
        each with a live timer, so the current stage is visible at a glance. It shows the STEPS
@@ -461,57 +471,311 @@
       }
     }
 
-    /* The capybara. The tells, from the reference photo, and dropping any two of them turns it
-       back into a teddy bear (which is exactly what the first attempt was): brick-shaped head
-       wider than tall with small top corners; TINY ears set high and far back; a muzzle taking
-       two thirds of the face; small eyes set high and wide; dry grey-brown, not chocolate. */
-    function drawCapybara(c, W, r, t) {
-      const cx = W / 2, cy = W / 2, u = W / 100;
-      const bob = Math.sin(t * (r.mouth > 0.2 ? 6 : 1.4)) * u * (r.mouth > 0.2 ? 1.6 : 0.8);
+    /* CLIPPY. Traced from the reference on 2026-08-08 after two attempts drawn from memory came
+       out wrong the same way twice - I kept building the clip upside down. The construction that
+       actually matters:
+         - both U-bends at the BOTTOM, nested (a wide outer one, a narrow inner one),
+         - joined by a narrow ARCH at the top, whose two legs are what the eyes sit on,
+         - two free ends, both around mid-height, one per U,
+         - eyes ENORMOUS and VERTICALLY OFFSET from each other (left higher). Level eyes read as
+           a robot; the offset is most of the charm,
+         - brows as thick TAPERED black shapes, well clear of the eyes, at opposing angles,
+         - lavender wire, never grey, and never drawn upright.
+       Geometry is in u = W/100 units so every number below is a percentage of the tile. */
+    function clipWire(c, u, squash, bend) {
+      const xInL = -6 * u + bend, xInR = 6 * u, xOutL = -16 * u, xOutR = 12 * u, xArchL = -10 * u;
+      const yMid = -2 * u * squash, yInU = 20 * u * squash;
+      const yOutU = 26 * u * squash, yArch = -30 * u * squash;
+      c.beginPath();
+      c.moveTo(xInL, yMid);
+      c.lineTo(xInL, yInU);
+      c.arc((xInL + xInR) / 2, yInU, (xInR - xInL) / 2, Math.PI, 0, true);
+      c.lineTo(xInR, yArch);
+      c.arc((xArchL + xInR) / 2, yArch, (xInR - xArchL) / 2, 0, Math.PI, true);
+      c.lineTo(xOutL, yOutU);
+      c.arc((xOutL + xOutR) / 2, yOutU, (xOutR - xOutL) / 2, Math.PI, 0, true);
+      c.lineTo(xOutR + 2 * u, yMid + 2 * u);
+      c.stroke();
+    }
+
+    function clipEyes(c, u, r, squash, asleep) {
+      const eyes = [[-11.3 * u, -18.5 * u * squash, 11.8 * u], [6 * u, -10 * u * squash, 10.6 * u]];
+      const lookX = (r.look[0] || 0) * 3 * u, lookY = (r.look[1] || 0) * 2.6 * u;
+      // r.mouth carries the mic level on the recording rig; with no mouth to open, it dilates the
+      // pupils instead, so loudness is still visible on the face itself.
+      const dilate = mode === "recording" ? 1 + Math.min(0.30, r.mouth * 0.30) : 1;
+      for (const [ex, ey, er] of eyes) {
+        c.beginPath(); c.ellipse(ex, ey, er * 0.90, er, -0.12, 0, 6.2832);
+        c.fillStyle = "#f4f4fb"; c.fill();
+        c.lineWidth = Math.max(0.8, u * 0.9); c.strokeStyle = "#a9adcf"; c.stroke();
+        if (asleep || r.eyes < 0.2) {
+          c.strokeStyle = "#15161c"; c.lineWidth = Math.max(1.4, u * 1.8); c.lineCap = "round";
+          c.beginPath(); c.moveTo(ex - er * 0.62, ey); c.lineTo(ex + er * 0.62, ey); c.stroke();
+        } else {
+          c.beginPath();
+          c.ellipse(ex + lookX, ey + lookY, er * 0.56 * r.eyes * dilate, er * 0.50 * r.eyes * dilate, -0.12, 0, 6.2832);
+          c.fillStyle = "#15161c"; c.fill();
+        }
+      }
+      // Brows are the only mobile part he has, so they carry every expression. Filled rather than
+      // stroked because the TAPER is the tell - an even-width stroke reads as a drawn-on line.
+      const raise = r.brow || 0;
+      function brow(x1, y1, cxp, cyp, x2, y2, thick) {
+        c.beginPath(); c.moveTo(x1, y1);
+        c.quadraticCurveTo(cxp, cyp, x2, y2);
+        c.quadraticCurveTo(cxp, cyp + thick, x1, y1);
+        c.fillStyle = "#15161c"; c.fill();
+      }
+      const ly = -18.5 * u * squash, ry = -10 * u * squash;
+      brow(-24.8 * u, ly - 8.5 * u + raise, -12.3 * u, ly - 17.5 * u + raise,
+           -3.8 * u, ly - 10 * u + raise, u * 4);
+      brow(3 * u, ry - 13 * u + raise, 14.5 * u, ry - 15 * u + raise,
+           17.5 * u, ry - 3 * u + raise, u * 3.4);
+    }
+
+    /* The gag reel. Nineteen of Clippy's own animations, fired at random and ONLY while idle -
+       a gag on top of real work would hide the state the orb exists to show. Four of them are
+       morphs that replace the body entirely and keep only the eyes, which is how the originals
+       worked: the character lives in the eyes, so the body is free to become anything. */
+    const GAGS = ["sleep", "wave", "lightbulb", "screentap", "watch", "spin", "stretch",
+                  "bicycle", "airplane", "magnifier", "alert", "question", "globe",
+                  "print", "rollup", "point", "peek", "book", "juggle"];
+    let gag = null, gagUntil = 0, nextGagAt = 0;
+
+    function pickGag(nowMs) {
+      if (mode !== "idle") { gag = null; nextGagAt = nowMs + 12000; return; }
+      if (gag && nowMs > gagUntil) { gag = null; }
+      if (!gag && nowMs > nextGagAt) {
+        gag = GAGS[(Math.random() * GAGS.length) | 0];
+        gagUntil = nowMs + 2800;
+        nextGagAt = nowMs + 25000 + Math.random() * 45000;
+      }
+    }
+
+    function morphEyes(c, u, x, y, er) {
+      c.save(); c.translate(x, y);
+      for (const sx of [-er * 1.05, er * 1.05]) {
+        c.beginPath(); c.ellipse(sx, 0, er * 0.92, er, 0, 0, 6.2832);
+        c.fillStyle = "#f4f4fb"; c.fill();
+        c.lineWidth = Math.max(0.7, u * 0.8); c.strokeStyle = "#a9adcf"; c.stroke();
+        c.beginPath(); c.ellipse(sx, 0, er * 0.52, er * 0.48, 0, 0, 6.2832);
+        c.fillStyle = "#15161c"; c.fill();
+      }
+      c.restore();
+    }
+
+    function drawMorph(c, u, which, t) {
+      c.strokeStyle = "#8f93bd"; c.lineCap = "round"; c.lineJoin = "round";
+      if (which === "bicycle") {
+        const x = ((t % 3) / 3 - 0.5) * 40 * u, wy = 20 * u, R = 11.5 * u;
+        c.save(); c.translate(x, 0);
+        c.lineWidth = Math.max(1.4, u * 2.6);
+        for (const wx of [-15 * u, 15 * u]) {
+          c.beginPath(); c.arc(wx, wy, R, 0, 6.2832); c.stroke();
+          c.save(); c.translate(wx, wy); c.rotate(t * 7); c.lineWidth = Math.max(0.7, u);
+          for (let i = 0; i < 4; i++) { c.rotate(Math.PI / 4); c.beginPath(); c.moveTo(-R, 0); c.lineTo(R, 0); c.stroke(); }
+          c.restore();
+        }
+        c.lineWidth = Math.max(1.8, u * 3.4);
+        c.beginPath();
+        c.moveTo(-15 * u, wy); c.lineTo(-2 * u, -2 * u); c.lineTo(15 * u, wy);
+        c.moveTo(-2 * u, -2 * u); c.lineTo(10 * u, -16 * u);
+        c.stroke();
+        morphEyes(c, u, 4 * u, -20 * u, 5.2 * u);
+        c.restore(); return;
+      }
+      if (which === "globe") {
+        const R = 20 * u;
+        c.lineWidth = Math.max(1.2, u * 2.2);
+        c.beginPath(); c.arc(0, 0, R, 0, 6.2832); c.stroke();
+        c.save(); c.beginPath(); c.arc(0, 0, R, 0, 6.2832); c.clip();
+        c.lineWidth = Math.max(0.8, u * 1.3);
+        for (let i = -2; i <= 2; i++) { c.beginPath(); c.moveTo(-R, i * R * 0.42); c.lineTo(R, i * R * 0.42); c.stroke(); }
+        for (let i = 0; i < 4; i++) {
+          const ph = ((t * 0.6 + i / 4) % 1) * 2 - 1;
+          c.beginPath(); c.ellipse(0, 0, Math.abs(ph) * R, R, 0, 0, 6.2832); c.stroke();
+        }
+        c.restore();
+        morphEyes(c, u, 0, -R * 0.30, 5 * u); return;
+      }
+      if (which === "rollup") {
+        const bounce = Math.abs(Math.sin(t * 3.4));
+        const R = 15 * u - bounce * 1.2 * u, y = 12 * u - bounce * 20 * u;
+        c.save(); c.translate(0, y); c.rotate(t * 4);
+        c.lineWidth = Math.max(1.6, u * 3.4);
+        c.beginPath();
+        for (let a = 0; a < Math.PI * 4; a += 0.18) {
+          const rr = R * (0.30 + 0.70 * (a / (Math.PI * 4)));
+          const px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+          a === 0 ? c.moveTo(px, py) : c.lineTo(px, py);
+        }
+        c.stroke(); c.restore();
+        morphEyes(c, u, 0, y - R * 0.15, 4.2 * u); return;
+      }
+      // paper plane
+      const p = (t % 3.2) / 3.2;
       c.save();
-      c.translate(cx, cy + bob + (r.lean || 0) * u * 2);
-      c.rotate(r.look[0] * 0.05 + (r.lean || 0) * 0.04);
-      c.scale(1 + (r.lean || 0) * 0.04, 1 + (r.lean || 0) * 0.04);
+      c.translate((p - 0.42) * 48 * u, -Math.sin(p * Math.PI) * 16 * u);
+      c.rotate(-0.22 + Math.sin(p * Math.PI * 2) * 0.10);
+      c.lineWidth = Math.max(1.2, u * 2);
+      c.fillStyle = "rgba(160,165,205,.30)";
+      c.beginPath();
+      c.moveTo(-19 * u, -7 * u); c.lineTo(20 * u, 0); c.lineTo(-19 * u, 9 * u); c.lineTo(-11 * u, 0);
+      c.closePath(); c.fill(); c.stroke();
+      c.beginPath(); c.moveTo(-19 * u, -7 * u); c.lineTo(-11 * u, 0); c.stroke();
+      morphEyes(c, u, 2 * u, -1.5 * u, 4 * u);
+      c.restore();
+    }
 
-      // Ears perk when listening and flatten while working - legible even at 50px, where the
-      // eyes are three pixels wide.
-      const perk = 0.55 + 0.45 * (r.ears ?? 0.6);
-      for (const sx of [-1, 1]) {
-        const ey = -u * (20 + 4 * perk);
-        c.fillStyle = "#6b5943";
-        c.beginPath(); c.ellipse(sx * u * 31, ey, u * 4.4 * perk, u * 3.6 * perk, sx * 0.7, 0, 6.2832); c.fill();
-        c.fillStyle = "#463829";
-        c.beginPath(); c.ellipse(sx * u * 31.5, ey + u * 0.4, u * 2.0 * perk, u * 1.6 * perk, sx * 0.7, 0, 6.2832); c.fill();
+    /* Props that belong to a gag rather than to a working state. Gated on tile size: below ~70px
+       a lightbulb is four grey pixels, which reads as a rendering bug and not as a joke. */
+    function drawGagProps(c, u, W, which, t) {
+      if (W < 70) return;
+      if (which === "lightbulb") {
+        const by = -40 * u;
+        c.save(); c.globalAlpha = 0.55 + Math.abs(Math.sin(t * 4)) * 0.45;
+        c.strokeStyle = "#ffd66b"; c.fillStyle = "rgba(255,214,107,.22)";
+        c.lineWidth = Math.max(1.2, u * 2);
+        c.beginPath(); c.arc(0, by, 7.5 * u, 0, 6.2832); c.fill(); c.stroke();
+        c.beginPath(); c.moveTo(-3 * u, by + 8.2 * u); c.lineTo(3 * u, by + 8.2 * u); c.stroke();
+        c.lineWidth = Math.max(0.9, u * 1.3);
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * 6.2832 + t;
+          c.beginPath();
+          c.moveTo(Math.cos(a) * 10.5 * u, by + Math.sin(a) * 10.5 * u);
+          c.lineTo(Math.cos(a) * 14 * u, by + Math.sin(a) * 14 * u);
+          c.stroke();
+        }
+        c.restore();
+      }
+      if (which === "screentap") {
+        c.save(); c.strokeStyle = "rgba(255,255,255,.5)";
+        for (let i = 0; i < 3; i++) {
+          const p = ((t * 1.4 + i * 0.33) % 1);
+          c.globalAlpha = (1 - p) * 0.8; c.lineWidth = Math.max(0.8, u * 1.2);
+          c.beginPath(); c.arc(20 * u, 2 * u, (3 + p * 16) * u, 0, 6.2832); c.stroke();
+        }
+        c.restore();
+      }
+      if (which === "watch") {
+        c.save(); c.strokeStyle = "#d6dae8"; c.lineWidth = Math.max(1, u * 1.6);
+        c.beginPath(); c.arc(20 * u, 14 * u, 5.8 * u, 0, 6.2832); c.stroke();
+        c.lineWidth = Math.max(0.8, u * 1.2);
+        c.beginPath(); c.moveTo(20 * u, 14 * u); c.lineTo(20 * u, 10.4 * u); c.stroke();
+        c.beginPath(); c.moveTo(20 * u, 14 * u);
+        c.lineTo(20 * u + Math.cos(t * 6) * 3 * u, 14 * u + Math.sin(t * 6) * 3 * u); c.stroke();
+        c.restore();
+      }
+      if (which === "magnifier") {
+        const my = -4 * u + Math.sin(t * 3) * 2 * u;
+        c.save(); c.strokeStyle = "#d6dae8"; c.lineWidth = Math.max(1.2, u * 2);
+        c.beginPath(); c.arc(19 * u, my, 7.8 * u, 0, 6.2832);
+        c.fillStyle = "rgba(190,205,255,.12)"; c.fill(); c.stroke();
+        c.beginPath(); c.moveTo(24.5 * u, my + 5.5 * u); c.lineTo(30.5 * u, my + 11.5 * u); c.stroke();
+        c.restore();
+      }
+      if (which === "alert" || which === "question") {
+        c.save();
+        c.fillStyle = which === "alert" ? "#ffd66b" : "#7cc4ff";
+        c.font = `800 ${26 * u}px system-ui`; c.textAlign = "center";
+        const pop = 1 + Math.abs(Math.sin(t * 5)) * 0.18;
+        c.translate(20 * u, -26 * u); c.scale(pop, pop);
+        c.fillText(which === "alert" ? "!" : "?", 0, 0);
+        c.restore();
+      }
+      if (which === "print") {
+        const p = (t % 2) / 2;
+        c.save(); c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = Math.max(1, u * 1.4);
+        c.strokeRect(14 * u, 6 * u, 22 * u, 26 * u * p);
+        c.restore();
+      }
+      if (which === "point") {
+        c.save(); c.strokeStyle = "#8f93bd"; c.lineWidth = Math.max(1.6, u * 3.4); c.lineCap = "round";
+        const reach = (20 + Math.abs(Math.sin(t * 3)) * 6) * u;
+        c.beginPath(); c.moveTo(10 * u, 2 * u); c.lineTo(reach, -2 * u); c.stroke();
+        c.restore();
+      }
+      if (which === "book") {
+        const flip = Math.abs(Math.sin(t * 1.2));
+        c.save(); c.strokeStyle = "rgba(255,255,255,.5)"; c.lineWidth = Math.max(1, u * 1.4);
+        c.beginPath();
+        c.moveTo(6 * u, 16 * u); c.lineTo(-9 * u, 11.5 * u); c.lineTo(-9 * u, 23 * u);
+        c.lineTo(6 * u, 27.7 * u); c.lineTo(21 * u, 23 * u);
+        c.lineTo(6 * u + 15 * u * flip, 11.5 * u); c.lineTo(6 * u, 16 * u);
+        c.stroke(); c.restore();
+      }
+      if (which === "juggle") {
+        c.save(); c.fillStyle = "#d6dae8";
+        for (let i = 0; i < 3; i++) {
+          const a = t * 3 + (i / 3) * 6.2832;
+          c.beginPath();
+          c.arc(Math.cos(a) * 16 * u, -30 * u + Math.sin(a) * 6 * u, 2.6 * u, 0, 6.2832);
+          c.fill();
+        }
+        c.restore();
+      }
+      if (which === "sleep") {
+        c.save(); c.fillStyle = "rgba(255,255,255,.5)";
+        c.font = `600 ${11 * u}px system-ui`;
+        for (let i = 0; i < 3; i++) {
+          const p = ((t * 0.5 + i * 0.33) % 1);
+          c.globalAlpha = 1 - p;
+          c.fillText("z", (16 + p * 10) * u, (-20 - p * 18) * u);
+        }
+        c.restore();
+      }
+    }
+
+    function drawClippy(c, W, r, t) {
+      const cx = W / 2, cy = W / 2, u = W / 100;
+      let squash = 1, bend = 0, lean = 0, spin = 0, hop = 0, peekX = 0;
+
+      // State drives posture. He has no limbs, so the whole body does the acting.
+      if (mode === "recording")    { squash = 1.06; lean = 0.16; }
+      if (mode === "transcribing") { hop = Math.sin(t * 18) * 0.6 * u; bend = Math.sin(t * 18) * u; }
+      if (mode === "translating")  { squash = 0.92; }
+      if (mode === "pasting")      { lean = 0.28; }
+      if (mode === "idle")         { squash = 1 + Math.sin(t * 2) * 0.015; }
+
+      if (gag) {
+        if (gag === "bicycle" || gag === "airplane" || gag === "globe" || gag === "rollup") {
+          c.save(); c.translate(cx, cy); drawMorph(c, u, gag, t); c.restore();
+          return;
+        }
+        if (gag === "sleep")     { squash = 0.82; lean = 0.22; }
+        if (gag === "wave")      { lean = Math.sin(t * 5) * 0.16; }
+        if (gag === "lightbulb") { squash = 1.05 + Math.sin(t * 9) * 0.02; lean = -0.03; }
+        if (gag === "screentap") { squash = 1 + Math.sin(t * 7) * 0.03; lean = 0.13; }
+        if (gag === "watch")     { lean = 0.20; }
+        if (gag === "spin")      { spin = t * 5; squash = 0.88; }
+        if (gag === "stretch")   { squash = 1 + Math.abs(Math.sin(t * 2.2)) * 0.55; }
+        if (gag === "magnifier") { lean = -0.06; }
+        if (gag === "alert")     { hop = -Math.abs(Math.sin(t * 7)) * 6 * u; squash = 1.04; }
+        if (gag === "question")  { lean = 0.16 + Math.sin(t * 2) * 0.04; }
+        if (gag === "point")     { lean = 0.30; }
+        if (gag === "peek")      { peekX = -(16 + Math.sin(t * 1.6) * 10) * u; lean = 0.10; }
+        if (gag === "book")      { lean = 0.08; }
+        if (gag === "juggle")    { hop = Math.sin(t * 6) * 1.2 * u; }
       }
 
-      const g = c.createLinearGradient(0, -u * 30, 0, u * 34);
-      g.addColorStop(0, "#a68f6f"); g.addColorStop(1, "#7f6a4e");
-      c.fillStyle = g;
-      c.beginPath(); c.roundRect(-u * 39, -u * 26, u * 78, u * 54, [u * 12, u * 12, u * 22, u * 22]); c.fill();
+      c.save();
+      c.translate(cx + peekX, cy + hop);
+      c.rotate(-0.07 + lean + spin);   // never upright: drawn straight he is an office-supply icon
 
-      c.fillStyle = "#b89c78";
-      c.beginPath(); c.roundRect(-u * 33, -u * 3, u * 66, u * 33, [u * 12, u * 12, u * 20, u * 20]); c.fill();
+      c.strokeStyle = "#8f93bd";       // lavender, never grey - the colour is half the recognition
+      c.lineWidth = Math.max(2.2, u * 5.8);
+      c.lineCap = "round"; c.lineJoin = "round";
+      clipWire(c, u, squash, bend);
+      c.save();                         // a thinner lighter pass reads as rounded metal
+      c.strokeStyle = "rgba(210,214,240,.75)";
+      c.lineWidth = Math.max(0.8, u * 2);
+      c.translate(-0.6 * u, -0.6 * u);
+      clipWire(c, u, squash, bend);
+      c.restore();
 
-      c.fillStyle = "#3d2f26";
-      c.beginPath(); c.roundRect(-u * 16, 0, u * 32, u * 11, u * 5); c.fill();
-      c.fillStyle = "rgba(255,255,255,0.16)";
-      c.beginPath(); c.roundRect(-u * 13, u * 1.2, u * 26, u * 3, u * 1.5); c.fill();
-      c.fillStyle = "#1d1611";
-      for (const sx of [-1, 1]) {
-        c.beginPath(); c.ellipse(sx * u * 7, u * 6.5, u * 2.1, u * 2.8, sx * 0.3, 0, 6.2832); c.fill();
-      }
-
-      eye(c, -u * 24, -u * 15, u * 4.2, r.eyes, r.look, r.happy);
-      eye(c, u * 24, -u * 15, u * 4.2, r.eyes, r.look, r.happy);
-      mouth(c, 0, u * 20, u * 16, r.mouth);
-
-      // Paws only when he is holding something: permanent floating hands look like a costume.
-      if (r.prop && r.prop !== "none" && W >= 90) {
-        c.fillStyle = "#7f6a4e";
-        c.beginPath(); c.ellipse(-u * 20, u * 34, u * 8, u * 6, -0.3, 0, 6.2832); c.fill();
-        c.beginPath(); c.ellipse(u * 22, u * 32, u * 8, u * 6, 0.3, 0, 6.2832); c.fill();
-      }
-      drawProps(c, W, r, t);
+      clipEyes(c, u, r, squash, gag === "sleep");
+      if (gag) drawGagProps(c, u, W, gag, t);
+      else drawProps(c, W, r, t);
       c.restore();
     }
 
@@ -526,6 +790,7 @@
       // Same curve the menu-bar meter uses, so the two indicators can never disagree about how
       // loud the room is.
       const loud = Math.min(1, level * 9);
+      pickGag(nowMs);
       const r = rig(mode, loud, t, blink);
 
       const W = canvas.width, cx = W / 2, cy = W / 2;
@@ -535,15 +800,19 @@
       // The state colour survives as a halo, so the stage is still readable from the corner of
       // the eye without looking at the face.
       const [r0, g0, b0] = r.tint;
-      const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.56);
-      halo.addColorStop(0, `rgba(${r0},${g0},${b0},${mode === "idle" ? 0.16 : 0.36})`);
+      // While recording the halo BREATHES with the mic. The character has no mouth any more, so
+      // this is the only thing left that answers "are you hearing me?" without reading a colour.
+      const base = mode === "idle" ? 0.16 : 0.36;
+      const alpha = mode === "recording" ? 0.22 + loud * 0.45 : base;
+      const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * (mode === "recording" ? 0.50 + loud * 0.12 : 0.56));
+      halo.addColorStop(0, `rgba(${r0},${g0},${b0},${alpha})`);
       halo.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
       ctx.fillStyle = halo;
-      ctx.beginPath(); ctx.arc(cx, cy, W * 0.56, 0, 6.2832); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, W * (mode === "recording" ? 0.50 + loud * 0.12 : 0.56), 0, 6.2832); ctx.fill();
 
       ctx.save();
       ctx.scale(DPR, DPR);
-      drawCapybara(ctx, W / DPR, r, t);
+      drawClippy(ctx, W / DPR, r, t);
       ctx.restore();
 
       tickTimers();
