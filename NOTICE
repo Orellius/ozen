@@ -1,0 +1,50 @@
+Ozen
+Copyright (c) 2026 Orellius
+
+This program is free software: you can redistribute it and/or modify it under the terms of
+the GNU Affero General Public License, version 3, as published by the Free Software
+Foundation. See LICENSE for the full text.
+
+--------------------------------------------------------------------------------
+Third-party material in this repository
+--------------------------------------------------------------------------------
+
+None. Every source file in this repository was written for this project.
+
+--------------------------------------------------------------------------------
+Dependencies (linked or bundled into the shipped artifact)
+--------------------------------------------------------------------------------
+
+490 third-party Rust crates and 31 npm packages, audited 2026-08-08. The resolved set
+carries only permissive licenses - MIT, Apache-2.0, BSD, ISC, Zlib, BSL-1.0, Unicode-3.0
+- plus MPL-2.0 crates, whose secondary-license clause (MPL 2.0 section 3.3) permits
+combination with this program's license. No GPL-2.0-only and no LGPL-only dependency is
+in either tree. (`r-efi` offers LGPL-2.1-or-later as one of three options; MIT is taken,
+and it is a UEFI-target crate that is not built on macOS at all.)
+
+The authoritative lists are Cargo.lock and bun.lock.
+
+whisper-rs (MIT)
+    Rust bindings to whisper.cpp (MIT), which performs speech recognition on-device.
+    Linked into the shipped binary. Both carry permissive licenses.
+    https://github.com/tazz4843/whisper-rs · https://github.com/ggml-org/whisper.cpp
+
+--------------------------------------------------------------------------------
+Material used at run time, and NOT distributed with this program
+--------------------------------------------------------------------------------
+
+Speech-recognition model weights (ivrit-ai, and any other Whisper-format model)
+    Downloaded by the user and loaded at run time. Model weights are not code, are not
+    contained in this repository, and are not distributed with this program. They carry
+    their own terms, which the user is responsible for accepting.
+    https://huggingface.co/ivrit-ai
+
+DictaLM, served through Ollama (Ollama: MIT)
+    The Hebrew cleanup pass talks to a local Ollama server over HTTP. Neither Ollama nor
+    any model it serves is contained in or distributed with this program.
+    https://ollama.com · https://huggingface.co/dicta-il
+
+Anthropic Claude CLI
+    Optionally invoked by the offline improvement pass as an evaluation oracle. Not
+    contained in or distributed with this program; the user supplies their own
+    installation and credentials.
