@@ -34,15 +34,6 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  :root {
-    /* Must equal PILL_RADIUS in lib.rs, which clips the glass material. It stays constant
-       rather than scaling with the window because window-vibrancy's apply_vibrancy ADDS a new
-       NSVisualEffectView every call and never removes the old one, so re-applying it per resize
-       would stack views without bound. The window's MINIMUM is 72px for the same reason: a 23px
-       corner on a 56px box is a 0.41 ratio, which reads as a stadium/ellipse rather than as a
-       tile, and the corner cannot be changed after startup. */
-    --radius: 23px;
-  }
   html, body {
     margin: 0;
     width: 100%;
@@ -59,51 +50,75 @@
   /* LTR on purpose even though the labels are Hebrew: the tile must stay anchored where the
      user parked it and the drawer must grow to the RIGHT. In RTL the canvas would sit at the
      right edge and the window would appear to jump sideways every time a clip starts. */
+  /* No rounding and no clip: there is no tile any more, so a radius here would cut the
+     character's own drop shadow off at an invisible edge. */
+  /* column-reverse puts the notepad ABOVE the character: children are canvas then steps, and
+     reversing stacks the steps on top. LTR on purpose even with Hebrew labels, so the tile stays
+     anchored where the user parked it. */
   #wrap {
-    position: absolute; inset: 0; display: flex; align-items: center;
-    border-radius: var(--radius); overflow: hidden; direction: ltr;
+    position: absolute; inset: 0; display: flex; flex-direction: column-reverse;
+    align-items: center; justify-content: flex-start; direction: ltr;
   }
   canvas { display: block; flex: none; }
 
+  /* THE NOTEPAD. His yellow legal pad, floating above him as a thought bubble - the thing he
+     always wrote on. It replaces the side drawer: a column growing rightwards pushed the orb off
+     its parked spot, and the steps read as a system panel rather than as something HE is doing. */
   #steps {
-    flex: 1; min-width: 0; height: 100%;
     display: none; flex-direction: column; justify-content: center;
-    gap: 2px; padding: 6px 10px 6px 2px;
+    gap: 1px; width: 132px; margin-bottom: 4px;
+    padding: 7px 9px 8px;
+    background:
+      repeating-linear-gradient(
+        to bottom,
+        transparent 0 15px,
+        rgba(90, 120, 190, 0.30) 15px 16px
+      ),
+      linear-gradient(#fdf3b8, #f6e392);
+    border-radius: 3px 3px 4px 4px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.5) inset;
+    transform: rotate(-1.4deg);
+    position: relative;
+  }
+  /* The red margin rule down the left, which is most of what makes a legal pad legible as one. */
+  #steps::before {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 15px;
+    border-left: 1px solid rgba(210, 80, 80, 0.45);
+  }
+  /* The bubble's tail, pointing down at him. */
+  #steps::after {
+    content: ""; position: absolute; bottom: -5px; left: 50%;
+    width: 9px; height: 9px; margin-left: -4px;
+    background: #f6e392; transform: rotate(45deg);
+    box-shadow: 2px 2px 4px rgba(0,0,0,0.25);
   }
   #wrap.open #steps { display: flex; }
   .step {
-    display: flex; align-items: center; gap: 7px; direction: rtl;
-    color: rgba(255,255,255,0.42); white-space: nowrap;
-    transition: color .18s ease;
+    display: flex; align-items: center; gap: 6px; direction: rtl;
+    color: rgba(60, 60, 80, 0.45); white-space: nowrap; font-size: 10.5px;
+    line-height: 15px; transition: color .18s ease;
   }
   .step .dot {
-    width: 7px; height: 7px; border-radius: 50%; flex: none;
-    background: rgba(255,255,255,0.22);
+    width: 6px; height: 6px; border-radius: 50%; flex: none;
+    background: rgba(60, 60, 80, 0.22);
     box-shadow: none;
   }
-  .step .name { flex: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.45); }
+  .step .name { flex: 1; }
   .step .t { font-variant-numeric: tabular-nums; font-size: 10px; opacity: 0.75; direction: ltr; }
-  .step.done { color: rgba(255,255,255,0.66); }
-  .step.done .dot { background: #52d1a4; }
-  .step.live { color: #fff; font-weight: 600; }
-  .step.live .dot { background: #6ea8ff; box-shadow: 0 0 8px #6ea8ff; animation: pulse 1s ease-in-out infinite; }
-  .step.fail { color: #ffb4ae; }
-  .step.fail .dot { background: #ff6b6b; }
+  .step.done { color: rgba(50, 55, 75, 0.62); }
+  .step.done .dot { background: #2f9e6e; }
+  .step.live { color: #1b1f2c; font-weight: 700; }
+  .step.live .dot { background: #2f6fd0; animation: pulse 1s ease-in-out infinite; }
+  .step.fail { color: #a8322b; }
+  .step.fail .dot { background: #c0392b; }
   @keyframes pulse { 50% { transform: scale(0.6); opacity: 0.55; } }
 
   /* The edge treatment that makes it read as a Dock tile rather than a floating rectangle:
      a bright specular hairline along the top, a hairline outline, and a contact shade at the
      bottom. All inset - the window is exactly tile-sized, so an outer shadow would be clipped. */
-  #edge {
-    position: absolute;
-    inset: 0;
-    border-radius: var(--radius);
-    pointer-events: none;
-    box-shadow:
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.55),
-      inset 0 0 0 0.5px rgba(255, 255, 255, 0.14),
-      inset 0 -1px 1.5px rgba(0, 0, 0, 0.28);
-  }
+  /* The tile's edge treatment is gone with the tile. Kept as an empty element rather than
+     deleted so the layout and the drag guard keep the geometry they were tuned against. */
+  #edge { position: absolute; inset: 0; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -236,14 +251,18 @@
     /* ==================== WINDOW GEOMETRY: OPEN AND CLOSE ====================
        The tile size is the user's; the drawer is ours. `tileSize` is captured only while idle,
        so a resize made with the drawer open cannot be mistaken for a new tile size. */
-    const DRAWER_W = 132;   // logical px of steps column
-    const MIN_OPEN_H = 104; // four rows need this much; a smaller tile grows to it and back
+    const PAD_H = 84;       // logical px the notepad needs above the tile
+    const PAD_W = 150;       // the pad is wider than a small tile, so the window may widen too
     let tileSize = 104;
     let isOpen = false;
     let geomBusy = false;
+    let openedFromX = 0, openedFromY = 0;   // where the tile sat before the pad pushed it up
 
     async function setOpen(open) {
-      if (!TAURI || open === isOpen || geomBusy) return;
+      if (open === isOpen || geomBusy) return;
+      // Standalone preview: there is no window to resize, but the pad must still open, or the
+      // browser preview silently cannot show the thing it exists to let us judge.
+      if (!TAURI) { isOpen = open; wrap.classList.toggle("open", open); return; }
       geomBusy = true;
       try {
         const { getCurrentWindow, LogicalSize, LogicalPosition } = window.__TAURI__.window;
@@ -252,17 +271,24 @@
         const size = (await win.innerSize()).toLogical(scale);
         const pos = (await win.outerPosition()).toLogical(scale);
         if (!open) {
+          // Put the window back exactly where the tile was: the height came off the TOP, so the
+          // origin has to come back down by the same amount or he walks up the screen every clip.
           await win.setSize(new LogicalSize(tileSize, tileSize));
+          await win.setPosition(new LogicalPosition(openedFromX, openedFromY));
         } else {
           tileSize = Math.round(Math.min(size.width, size.height));
-          const w = tileSize + DRAWER_W;
-          const h = Math.max(tileSize, MIN_OPEN_H);
-          // Grow to the right, unless that would run off the screen - then take the width from
-          // the left instead. The orb lives next to the Dock; a drawer that opens off-screen is
-          // a drawer that does not exist.
-          const room = window.screen.availWidth - (pos.x + w);
-          if (room < 8) await win.setPosition(new LogicalPosition(Math.max(0, pos.x - (8 - room)), pos.y));
+          openedFromX = pos.x; openedFromY = pos.y;
+          const w = Math.max(tileSize, PAD_W);
+          const h = tileSize + PAD_H;
+          // The pad opens UPWARD, so the window's origin moves up by the added height and the
+          // tile stays under the user's cursor. If there is no room above, take it from below by
+          // leaving the origin alone - a pad off the top of the screen is a pad that does not exist.
+          const grewBy = h - Math.round(size.height);
+          const widenBy = Math.round((w - Math.round(size.width)) / 2);
+          const y = pos.y - grewBy >= 4 ? pos.y - grewBy : pos.y;
+          const x = Math.max(0, Math.min(window.screen.availWidth - w, pos.x - Math.max(0, widenBy)));
           await win.setSize(new LogicalSize(w, h));
+          await win.setPosition(new LogicalPosition(x, y));
         }
         isOpen = open;
         wrap.classList.toggle("open", open);
@@ -326,6 +352,7 @@
       mode = s;
       markLive(s);
     });
+    let levelSmooth = 0;
     listen("level", (e) => { level = e.payload; });
     listen("result", () => {
       finishSteps(true);
@@ -482,10 +509,12 @@
          - brows as thick TAPERED black shapes, well clear of the eyes, at opposing angles,
          - lavender wire, never grey, and never drawn upright.
        Geometry is in u = W/100 units so every number below is a percentage of the tile. */
-    function clipWire(c, u, squash, bend) {
+    function clipWire(c, u, squash, bend, jaw) {
       const xInL = -6 * u + bend, xInR = 6 * u, xOutL = -16 * u, xOutR = 12 * u, xArchL = -10 * u;
       const yMid = -2 * u * squash, yInU = 20 * u * squash;
       const yOutU = 26 * u * squash, yArch = -30 * u * squash;
+
+      // Everything except the outer-right arm: one continuous wire, ending at the hinge.
       c.beginPath();
       c.moveTo(xInL, yMid);
       c.lineTo(xInL, yInU);
@@ -494,16 +523,28 @@
       c.arc((xArchL + xInR) / 2, yArch, (xInR - xArchL) / 2, 0, Math.PI, true);
       c.lineTo(xOutL, yOutU);
       c.arc((xOutL + xOutR) / 2, yOutU, (xOutR - xOutL) / 2, Math.PI, 0, true);
-      c.lineTo(xOutR + 2 * u, yMid + 2 * u);
       c.stroke();
+
+      // THE JAW (Orel's call, 2026-08-08). His lower-right free tip hinges where the wide U ends
+      // and swings open with the voice. This is where the mic level belongs. The previous build
+      // drove pupil SIZE and halo brightness from it instead, and raw RMS jitters every frame, so
+      // he flashed and his eyes pulsed. One signal, one moving part.
+      c.save();
+      c.translate(xOutR, yOutU);
+      c.rotate((jaw || 0) * 0.5);           // INWARD, toward his face - shut at rest, ~29 deg open
+      c.beginPath();
+      c.moveTo(0, 0);
+      c.lineTo(2 * u, yMid - yOutU + 2 * u);
+      c.stroke();
+      c.restore();
     }
 
     function clipEyes(c, u, r, squash, asleep) {
       const eyes = [[-11.3 * u, -18.5 * u * squash, 11.8 * u], [6 * u, -10 * u * squash, 10.6 * u]];
       const lookX = (r.look[0] || 0) * 3 * u, lookY = (r.look[1] || 0) * 2.6 * u;
-      // r.mouth carries the mic level on the recording rig; with no mouth to open, it dilates the
-      // pupils instead, so loudness is still visible on the face itself.
-      const dilate = mode === "recording" ? 1 + Math.min(0.30, r.mouth * 0.30) : 1;
+      // Pupils are a FIXED size. They used to dilate with the mic, which read as the eyes growing
+      // and shrinking at random. The level lives in the jaw now.
+      const dilate = 1;
       for (const [ex, ey, er] of eyes) {
         c.beginPath(); c.ellipse(ex, ey, er * 0.90, er, -0.12, 0, 6.2832);
         c.fillStyle = "#f4f4fb"; c.fill();
@@ -728,6 +769,11 @@
 
     function drawClippy(c, W, r, t) {
       const cx = W / 2, cy = W / 2, u = W / 100;
+      // r.mouth is the rig's mic-level channel while recording; otherwise he is quiet, with a
+      // faint idle motion so he does not look frozen.
+      const jaw = mode === "recording" ? Math.min(1, r.mouth)
+                : mode === "idle" ? 0.05 + Math.sin(t * 1.6) * 0.05
+                : 0.10;
       let squash = 1, bend = 0, lean = 0, spin = 0, hop = 0, peekX = 0;
 
       // State drives posture. He has no limbs, so the whole body does the acting.
@@ -739,7 +785,13 @@
 
       if (gag) {
         if (gag === "bicycle" || gag === "airplane" || gag === "globe" || gag === "rollup") {
-          c.save(); c.translate(cx, cy); drawMorph(c, u, gag, t); c.restore();
+          c.save();
+          c.translate(cx, cy);
+          c.shadowColor = "rgba(0,0,0,0.5)";
+          c.shadowBlur = Math.max(3, u * 6);
+          c.shadowOffsetY = Math.max(1, u * 2);
+          drawMorph(c, u, gag, t);
+          c.restore();
           return;
         }
         if (gag === "sleep")     { squash = 0.82; lean = 0.22; }
@@ -765,15 +817,32 @@
       c.strokeStyle = "#8f93bd";       // lavender, never grey - the colour is half the recognition
       c.lineWidth = Math.max(2.2, u * 5.8);
       c.lineCap = "round"; c.lineJoin = "round";
-      clipWire(c, u, squash, bend);
+      // THE SHADOW IS THE ONLY THING SEPARATING HIM FROM THE DESKTOP now that the glass tile is
+      // gone. It is drawn here rather than set on the window because the window's shadow is the
+      // shadow of a RECTANGLE, which is exactly the shape being removed. Soft and offset down,
+      // so he reads as sitting above the screen rather than stuck to it.
+      c.save();
+      c.shadowColor = "rgba(0,0,0,0.55)";
+      c.shadowBlur = Math.max(3, u * 7);
+      c.shadowOffsetY = Math.max(1, u * 2.2);
+      clipWire(c, u, squash, bend, jaw);   // shadow pass: same path, so the silhouette casts it
+      c.restore();
+      clipWire(c, u, squash, bend, jaw);
       c.save();                         // a thinner lighter pass reads as rounded metal
       c.strokeStyle = "rgba(210,214,240,.75)";
       c.lineWidth = Math.max(0.8, u * 2);
       c.translate(-0.6 * u, -0.6 * u);
-      clipWire(c, u, squash, bend);
+      clipWire(c, u, squash, bend, jaw);
       c.restore();
 
+      // The eyes get their own, tighter shadow: they are the brightest thing on him and would
+      // otherwise float free of the body against a light background.
+      c.save();
+      c.shadowColor = "rgba(0,0,0,0.45)";
+      c.shadowBlur = Math.max(2, u * 4);
+      c.shadowOffsetY = Math.max(1, u * 1.4);
       clipEyes(c, u, r, squash, gag === "sleep");
+      c.restore();
       if (gag) drawGagProps(c, u, W, gag, t);
       else drawProps(c, W, r, t);
       c.restore();
@@ -789,7 +858,11 @@
 
       // Same curve the menu-bar meter uses, so the two indicators can never disagree about how
       // loud the room is.
-      const loud = Math.min(1, level * 9);
+      // Smoothed: raw RMS swings hard between syllables, and anything driven straight off it
+      // strobes. Fast to open, slower to close, which is how a jaw actually moves.
+      const raw = Math.min(1, level * 9);
+      levelSmooth += (raw - levelSmooth) * (raw > levelSmooth ? 0.35 : 0.12);
+      const loud = levelSmooth;
       pickGag(nowMs);
       const r = rig(mode, loud, t, blink);
 
@@ -802,13 +875,14 @@
       const [r0, g0, b0] = r.tint;
       // While recording the halo BREATHES with the mic. The character has no mouth any more, so
       // this is the only thing left that answers "are you hearing me?" without reading a colour.
-      const base = mode === "idle" ? 0.16 : 0.36;
-      const alpha = mode === "recording" ? 0.22 + loud * 0.45 : base;
-      const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * (mode === "recording" ? 0.50 + loud * 0.12 : 0.56));
+      // The halo is STEADY. Driving its brightness and radius from the raw mic made the whole orb
+      // flash on every syllable; it only says which stage we are in.
+      const alpha = mode === "idle" ? 0.16 : 0.36;
+      const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.56);
       halo.addColorStop(0, `rgba(${r0},${g0},${b0},${alpha})`);
       halo.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
       ctx.fillStyle = halo;
-      ctx.beginPath(); ctx.arc(cx, cy, W * (mode === "recording" ? 0.50 + loud * 0.12 : 0.56), 0, 6.2832); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, W * 0.56, 0, 6.2832); ctx.fill();
 
       ctx.save();
       ctx.scale(DPR, DPR);
