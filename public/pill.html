@@ -251,10 +251,20 @@
     /* ==================== WINDOW GEOMETRY: OPEN AND CLOSE ====================
        The tile size is the user's; the drawer is ours. `tileSize` is captured only while idle,
        so a resize made with the drawer open cannot be mistaken for a new tile size. */
-    const PAD_H = 84;       // logical px the notepad needs above the tile
-    const PAD_W = 150;       // the pad is wider than a small tile, so the window may widen too
-    let tileSize = 104;
-    let isOpen = false;
+    // The pad's height is MEASURED, not guessed. The first version reserved 84px for something
+    // that needs about 82 before its tilt, tail and shadow - two pixels of slack - and in a
+    // column-reverse flex the overflow goes off the TOP, so the pad was sliced in half. A constant
+    // here also silently breaks the moment the step labels change language or the font metrics
+    // move. Ask the element.
+    const PAD_SLACK = 14;    // the ::after tail (5px) plus the drop shadow, which live outside the box
+    const PAD_W = 158;       // the pad is wider than a small tile, so the window may widen too
+    function measurePadH() {
+      const wasOpen = wrap.classList.contains("open");
+      if (!wasOpen) wrap.classList.add("open");
+      const h = Math.ceil(stepsEl.getBoundingClientRect().height);
+      if (!wasOpen) wrap.classList.remove("open");
+      return h + PAD_SLACK;
+    }
     let geomBusy = false;
     let openedFromX = 0, openedFromY = 0;   // where the tile sat before the pad pushed it up
 
@@ -262,7 +272,7 @@
       if (open === isOpen || geomBusy) return;
       // Standalone preview: there is no window to resize, but the pad must still open, or the
       // browser preview silently cannot show the thing it exists to let us judge.
-      if (!TAURI) { isOpen = open; wrap.classList.toggle("open", open); return; }
+      if (!TAURI) { isOpen = open; wrap.classList.toggle("open", open); fit(); return; }
       geomBusy = true;
       try {
         const { getCurrentWindow, LogicalSize, LogicalPosition } = window.__TAURI__.window;
@@ -279,7 +289,7 @@
           tileSize = Math.round(Math.min(size.width, size.height));
           openedFromX = pos.x; openedFromY = pos.y;
           const w = Math.max(tileSize, PAD_W);
-          const h = tileSize + PAD_H;
+          const h = tileSize + measurePadH();
           // The pad opens UPWARD, so the window's origin moves up by the added height and the
           // tile stays under the user's cursor. If there is no room above, take it from below by
           // leaving the origin alone - a pad off the top of the screen is a pad that does not exist.
@@ -292,12 +302,14 @@
         }
         isOpen = open;
         wrap.classList.toggle("open", open);
+        fit();
       } catch (e) {
         // A geometry failure must never take the indicator down with it: the character keeps
         // animating in whatever size the window happens to be.
         console.error("[pill] resize failed", e);
         isOpen = open;
         wrap.classList.toggle("open", open);
+        fit();
       } finally {
         geomBusy = false;
       }
@@ -310,14 +322,25 @@
     /* ============================== THE CHARACTER ==============================
        One rig, read by the draw code: eyes 1 = wide open / 0 = shut, mouth 0 = closed / 1 =
        wide, look = where the pupils point, ears = perk, prop = what he is holding. */
+    // Declared here, above fit(), because fit() now depends on both: the canvas must keep the
+    // user's tile size while the window is temporarily larger for the notepad.
+    let isOpen = false;
+    let tileSize = 104;
+
     const canvas = document.getElementById("eq");
     const DPR = window.devicePixelRatio || 2;
     const ctx = canvas.getContext("2d");
     let TILE = 104;
 
     function fit() {
-      // The canvas is always the SQUARE part of the window; the rest is the drawer.
-      TILE = Math.max(48, Math.min(window.innerWidth, window.innerHeight));
+      // The canvas is the SQUARE part of the window - but ONLY the tile the user sized. Deriving
+      // it from the window was correct while the drawer grew sideways and wrong the moment the
+      // notepad arrived: the window widens to fit the pad, so min(w,h) picked up the PAD's width
+      // and the character visibly grew by half every time a clip started. Measured 2026-08-08 on
+      // Orel's report ("why clippy resizes when speaks"): tile 104 -> canvas 158 while open.
+      TILE = isOpen
+        ? tileSize
+        : Math.max(48, Math.min(window.innerWidth, window.innerHeight));
       canvas.style.width = TILE + "px";
       canvas.style.height = TILE + "px";
       canvas.width = Math.round(TILE * DPR);
@@ -446,9 +469,11 @@
       const u = W / 100;
       if (W < 90) {
         const x = u * 30, y = u * 30;
-        c.fillStyle = "rgba(255,255,255,0.92)";
+        // Legal-pad yellow, the same paper as the notepad above his head - it should read as the
+        // same object in his hand and over his head, not as two different props.
+        c.fillStyle = "#f6e392";
         c.beginPath(); c.roundRect(x - u * 9, y - u * 11, u * 18, u * 22, u * 3); c.fill();
-        c.strokeStyle = "rgba(0,0,0,0.35)"; c.lineWidth = Math.max(1, u * 1.2);
+        c.strokeStyle = "rgba(70,100,170,0.55)"; c.lineWidth = Math.max(1, u * 1.2);
         const lines = r.prop === "write" ? 1 + Math.floor((t * 3) % 3) : 3;
         for (let i = 0; i < lines; i++) {
           c.beginPath(); c.moveTo(x - u * 5.5, y - u * 5 + i * u * 5); c.lineTo(x + u * 5.5, y - u * 5 + i * u * 5); c.stroke();
@@ -465,15 +490,18 @@
       c.translate(px, py); c.rotate(show ? 0 : writing ? 0.16 : 0.1);
       c.scale(show ? 1.15 : 0.95, show ? 1.15 : 0.95);
       c.globalAlpha = hand ? 1 - slide * 0.85 : 1;
-      c.fillStyle = "#f6f2e8";
+      c.fillStyle = "#f6e392";                      // legal-pad yellow, matching the notepad above
       c.beginPath(); c.roundRect(-u * 17, -u * 21, u * 34, u * 42, u * 3); c.fill();
-      c.strokeStyle = "rgba(0,0,0,0.22)"; c.lineWidth = Math.max(1, u * 0.9);
+      c.strokeStyle = "rgba(150,120,40,0.35)"; c.lineWidth = Math.max(1, u * 0.9);
       c.beginPath(); c.roundRect(-u * 17, -u * 21, u * 34, u * 42, u * 3); c.stroke();
+      // The red margin rule, which is most of what makes a legal pad legible as one at this size.
+      c.strokeStyle = "rgba(210,80,80,0.45)"; c.lineWidth = Math.max(0.8, u * 0.8);
+      c.beginPath(); c.moveTo(-u * 11, -u * 21); c.lineTo(-u * 11, u * 21); c.stroke();
       // While writing the lines fill in one at a time and the last one is short. A full page of
       // text under a pen that is still moving is the tell of a fake writing animation.
       const total = 5;
       const filled = writing ? 1 + Math.floor((t * 1.6) % total) : total;
-      c.strokeStyle = "rgba(40,46,60,0.55)"; c.lineWidth = Math.max(1, u * 1.6); c.lineCap = "round";
+      c.strokeStyle = "rgba(45,70,140,0.60)"; c.lineWidth = Math.max(1, u * 1.6); c.lineCap = "round";
       for (let i = 0; i < filled; i++) {
         const w = i === filled - 1 && writing ? u * (6 + 14 * ((t * 1.6) % 1)) : u * 24;
         const y = -u * 14 + i * u * 7.5;
@@ -777,7 +805,9 @@
       let squash = 1, bend = 0, lean = 0, spin = 0, hop = 0, peekX = 0;
 
       // State drives posture. He has no limbs, so the whole body does the acting.
-      if (mode === "recording")    { squash = 1.06; lean = 0.16; }
+      // Leaning in is the listening pose; SCALING is not. A 6% squash on state change read as
+      // the character resizing itself the moment you started talking.
+      if (mode === "recording")    { lean = 0.16; }
       if (mode === "transcribing") { hop = Math.sin(t * 18) * 0.6 * u; bend = Math.sin(t * 18) * u; }
       if (mode === "translating")  { squash = 0.92; }
       if (mode === "pasting")      { lean = 0.28; }
