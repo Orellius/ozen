@@ -99,7 +99,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=80, help="max utterances graded in one pass")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--since", type=int, default=0, help="override the watermark (epoch ms)")
+    # -1, not 0, because `args.since or state["last_at"]` treats a 0 as "unset" and silently falls
+    # back to the watermark - so `--since 0` (re-grade everything) did the exact opposite and
+    # reported "graded 0" as if there were nothing to do. Found by running it, not by reading it.
+    ap.add_argument(
+        "--since", type=int, default=-1, help="override the watermark (epoch ms; 0 = re-grade all)"
+    )
     args = ap.parse_args()
 
     if not LOG.exists():
@@ -107,7 +112,7 @@ def main() -> int:
         return 0
 
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
-    since = args.since or state.get("last_at", 0)
+    since = args.since if args.since >= 0 else state.get("last_at", 0)
 
     entries = [
         e

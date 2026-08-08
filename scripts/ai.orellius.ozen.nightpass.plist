@@ -44,11 +44,31 @@
     <key>StandardErrorPath</key>
     <string>/Users/orelohayon/Library/Application Support/ai.orellius.ozen/night-pass.log</string>
 
+    <!--
+      MEASURED 2026-08-08, and this block is the difference between a pass that runs and one that
+      fails silently at 5am. With PATH and HOME alone, `claude -p` exits 1 with the misleading
+      message "Credit balance is too low" - it cannot resolve the user identity, and nothing in
+      that error hints at the cause. Bisected: adding USER, LOGNAME and SHELL makes it exit 0.
+      Verified by running the real script under `env -i` with exactly these variables.
+      (Locale is NOT needed - python3 reports UTF-8 under an empty environment on this machine, so
+      Hebrew round-trips; LANG is set anyway because that default is a macOS version away from
+      changing and the failure would be a mangled dictionary.)
+    -->
     <key>EnvironmentVariables</key>
     <dict>
         <!-- launchd hands a minimal PATH; the Claude CLI lives in ~/.local/bin. -->
         <key>PATH</key>
         <string>/Users/orelohayon/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/orelohayon</string>
+        <key>USER</key>
+        <string>orelohayon</string>
+        <key>LOGNAME</key>
+        <string>orelohayon</string>
+        <key>SHELL</key>
+        <string>/bin/zsh</string>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
     </dict>
 </dict>
 </plist>
