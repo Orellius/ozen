@@ -115,6 +115,16 @@ body {
   font-size: 13px;
   text-align: center;
 }
+/* The overnight pass's one line. Set apart from the ordinary hint because it is the answer to
+   "did it learn anything while I slept" - the only visible evidence the loop is running. */
+.hint.night {
+  margin: -6px 0 16px;
+  padding: 7px 12px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  border-radius: 9px;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+}
 .sec {
   font-size: 11.5px;
   font-weight: 600;

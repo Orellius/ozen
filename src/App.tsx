@@ -49,6 +49,7 @@ const EMPTY: Snapshot = {
   rejections: [],
   glossary: [],
   mishearings: [],
+  night_summary: "",
 };
 
 interface Toast {
@@ -168,6 +169,7 @@ export function App() {
             logs={snap.logs}
             rejections={snap.rejections}
             glossary={snap.glossary}
+            nightSummary={snap.night_summary}
           />
         ) : null}
         {tab === "logs" ? (

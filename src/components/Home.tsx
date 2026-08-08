@@ -23,9 +23,10 @@ interface HomeProps {
   logs: LogEntry[];
   rejections: Rejection[];
   glossary: Term[];
+  nightSummary: string;
 }
 
-export function Home({ settings, logs, rejections, glossary }: HomeProps) {
+export function Home({ settings, logs, rejections, glossary, nightSummary }: HomeProps) {
   const s = computeStats(logs, rejections);
   const key = HOTKEY_LABEL[settings.hotkey] ?? settings.hotkey;
 
@@ -36,6 +37,12 @@ export function Home({ settings, logs, rejections, glossary }: HomeProps) {
           ? `החזק ${key} ודבר · שחרר כדי להדביק`
           : `הקש ${key} כדי להתחיל · הקש שוב כדי לסיים ולהדביק`}
       </p>
+
+      {nightSummary ? (
+        <p className="hint night" title="הפעלה אחרונה של שיפור הלילה">
+          🌙 {nightSummary}
+        </p>
+      ) : null}
 
       <div className="stats">
         <Tile label="הכתבות" value={s.count} sub={`${s.corrections} תוקנו`} />

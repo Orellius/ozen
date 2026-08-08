@@ -196,6 +196,28 @@ mod tests {
         assert!(hints_for("קומיטיםxxבלתיקיימים").is_empty());
     }
 
+    /// The measured mishearings from 2026-08-08, each one a sentence the app actually got wrong.
+    /// These are pinned by name because a proper noun is precisely what a translator cannot infer:
+    /// there is nothing in `רוזן` to tell a model it means a product called Ozen.
+    #[test]
+    fn the_names_it_used_to_mangle_now_resolve() {
+        for (sentence, want) in [
+            ("אני משתמש ברוזן כל היום", "Ozen"),        // shipped as "Rosen"
+            ("תעשה adjustment לפיירבול", "fireball"),   // shipped as "firewall"
+            ("עשיתי רלוד לאקסטינשן", "reload"),         // shipped as "reroll"
+            ("איך לעשות את האפרוץ הזה", "fanout"),      // shipped as "break-in"
+            ("תפתח את הקלודקוד", "Claude Code"),
+            ("תשאל את קלוד", "Claude"),
+        ] {
+            let h = hints_for(sentence);
+            let got: Vec<String> = h.iter().map(|t| format!("{}={}", t.he, t.en)).collect();
+            assert!(
+                h.iter().any(|t| t.en == want),
+                "{sentence:?} should hint {want:?}, got {got:?}"
+            );
+        }
+    }
+
     /// Slang carries the interpreter's rendering, never the literal one.
     #[test]
     fn slang_uses_the_interpreter_line() {

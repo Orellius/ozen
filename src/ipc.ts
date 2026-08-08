@@ -48,6 +48,8 @@ export interface LogEntry {
   /** How much the learned dictionary contributed - hints given, mishearings auto-repaired. */
   hints_used: number;
   auto_fixed: number;
+  /** He said roughly this again shortly afterwards - a free hint that this paste was wrong. */
+  redictated: boolean;
 }
 
 /** store.rs :: Mishearing - a word the ASR reliably gets wrong, and what was meant. */
@@ -85,6 +87,8 @@ export interface Snapshot {
   rejections: Rejection[];
   glossary: Term[];
   mishearings: Mishearing[];
+  /** One line from the last overnight improvement pass; empty until one has run. */
+  night_summary: string;
 }
 
 export const cmd = {

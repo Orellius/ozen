@@ -134,6 +134,9 @@ struct Snapshot {
     rejections: Vec<Rejection>,
     glossary: Vec<Term>,
     mishearings: Vec<Mishearing>,
+    /// One line from the last night pass, so "did it learn anything overnight" has an answer he
+    /// can read instead of a claim he has to trust. Empty until a pass has run.
+    night_summary: String,
 }
 
 fn now_ms() -> u64 {
@@ -701,6 +704,9 @@ fn run_pipeline(app: AppHandle, st: Arc<AppState>, samples: Vec<f32>) {
         confidence,
         hints_used,
         auto_fixed,
+        // Never set here: whether this utterance was a repeat is a fact about the PREVIOUS one,
+        // and only the store can see both. `append_log` decides it.
+        redictated: false,
     };
     st.store.append_log(entry.clone());
     // Vocabulary is built from what was ACCEPTED, never from raw ASR - otherwise the first
@@ -732,6 +738,7 @@ fn get_state(state: State<'_, Arc<AppState>>) -> Snapshot {
         rejections: state.store.rejections(),
         glossary: state.store.glossary(),
         mishearings: state.store.mishearings(),
+        night_summary: state.store.night_summary(),
     }
 }
 
@@ -892,6 +899,13 @@ pub fn run() {
 fn build_state(app: &tauri::App) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
     let dir = app.path().app_data_dir()?;
     let store = Arc::new(Store::load(dir));
+
+    // Whatever the night pass learned while he was asleep enters here, at startup, before the
+    // first dictation of the day. Startup is the only safe moment: the store is the single writer
+    // of dictionary.json, and this is the point where nothing else holds it.
+    if let Some(summary) = store.ingest_proposals() {
+        eprintln!("[ozen] night pass applied: {summary}");
+    }
 
     // A hotkey passed by env is a one-off override; persist it so the dashboard shows the truth.
     if let Ok(hk) = std::env::var("OZEN_HOTKEY") {

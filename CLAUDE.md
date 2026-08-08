@@ -40,6 +40,47 @@ Tauri whisper core from `~/Archive/_OSS/orellius-voice`, with a NATIVE audio pat
   all-workspaces, draggable. Needs `macOSPrivateApi: true` for transparency on macOS, and
   `withGlobalTauri: true` because it uses `window.__TAURI__` rather than bundled imports.
 
+## The self-improvement loop (2026-08-08) - how the app fixes itself
+
+Orel's ask, verbatim: "I want the software to fix itself instead of me having to do it... won't
+make me go through 300 sessions of recordings just to say, okay, fix this, save it."
+
+**The measurement that shaped the design.** The supervised half was dead: 5 corrections in 267
+utterances, `auto_fixed` 0 across every entry ever logged. And the obvious replacement - watch him
+edit the pasted text over the Accessibility API - is unavailable, because he dictates into Claude
+Code's shell and a terminal exposes no editable text. Re-dictation was measured as a fallback signal
+and is nearly dead too: **1 fire in 200 eligible consecutive pairs**, at every threshold from 0.3 to
+0.7. He does not repeat himself when the output is wrong; he takes the bad paste and moves on.
+
+So the loop is built to need **no human verdict at all**:
+
+1. **`scripts/eval/build-gold.py`** freezes a stratified 60-pair gold set (`docs/eval/gold.json`) -
+   reference translations from a strong model with no latency budget. This is the oracle; before it
+   existed, no prompt edit or model swap in this repo could be shown to have improved anything.
+2. **`scripts/eval/run-candidates.py` + `score.py`** run the gold set under a named config and grade
+   it on four separate axes. **Tense is its own axis** because it is the defect he named and an
+   aggregate would hide it. Deterministic checks (leading punctuation, missing capital, leftover
+   Hebrew, code fences) run in code where no judge can flatter them.
+3. **`scripts/night-pass.py`** grades recent real dictations with the same strong model and writes
+   `night-proposals.json` into the app data dir. It never touches `dictionary.json` - the app owns
+   that file and writes it whole, so a second writer would silently clobber it.
+4. **`Store::ingest_proposals`** applies the proposals at startup, exactly once, then archives the
+   file.
+
+**THE AUTHORITY SPLIT IS THE LOAD-BEARING PART.** Orel's own correction is ground truth: it locks a
+mishearing, feeds the aligner, forces a rendering. A grader's opinion is EVIDENCE and enters at the
+weakest useful level - exemplars (retrieved only for similar input, freely ignorable) and UNLOCKED
+mishearings (offered to the model as "maybe", never silently applied). The aligner is never fed by
+the night pass, because promotion produces a forced rendering and nothing machine-generated has
+earned that. `night_proposals_add_evidence_but_never_outrank_him` pins this, mutant-verified.
+
+**Apple has no Hebrew, measured on this machine 2026-08-08** (`sw_vers` 26.5.1) - so none of this
+can lean on it. Translation framework: 38 languages, `he->en` returns `unsupported`.
+FoundationModels: available, 23 languages, no Hebrew. NLTagger: no lemma and no part-of-speech for
+Hebrew, so no tense checking. NLEmbedding: nil for Hebrew, so no Apple-side similarity. `he-IL`
+speech recognition exists but reports `supportsOnDeviceRecognition = false`. Do not re-derive this;
+re-run `scripts/eval/` probes if a macOS release claims to have changed it.
+
 ## Non-obvious constraints (v0.5.0 - the self-correcting layer)
 
 - **The mishearing layer is the only thing that can see a "comic push".** A misheard word is

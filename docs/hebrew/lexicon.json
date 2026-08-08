@@ -5,10 +5,10 @@
  "compiled": "2026-08-06",
  "timezone": "Asia/Jerusalem",
  "counts": {
-  "dev-transliteration": 177,
+  "dev-transliteration": 193,
   "morphology": 29,
   "slang": 98,
-  "total": 304
+  "total": 320
  },
  "provenance": {
   "live_corpus": "~/Library/Application Support/ai.orellius.ozen/log.json - 70 utterances, 69 translate + 1 repair, all lang=he, mean whisper confidence 0.886, 0 operator corrections. Read 2026-08-06.",
@@ -8480,6 +8480,831 @@
    "register": "grammar",
    "notes": "Google's Cloud Translation glossary documentation states that individual terms over 1024 UTF-8 bytes are silently ignored and that some terms are treated as stopwords and skipped. A glossary that is not applied looks exactly like one that is. Any glossary layer Ozen builds needs a discriminating test: feed it the term, confirm the forced rendering appears; feed it the neighbouring term, confirm it does not.",
    "source": "https://docs.cloud.google.com/translate/docs/advanced/glossary (verified 2026-08-06)"
+  },
+  {
+   "id": "name:ozen",
+   "class": "dev-transliteration",
+   "he": "אוזן",
+   "en": [
+    "Ozen"
+   ],
+   "latin": "Ozen",
+   "register": "dev",
+   "variants": [
+    "רוזן",
+    "אוזען",
+    "עוזן"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "האוזן",
+     "לאוזן",
+     "באוזן",
+     "מאוזן",
+     "ואוזן",
+     "שאוזן",
+     "כאוזן",
+     "הרוזן",
+     "לרוזן",
+     "ברוזן",
+     "מרוזן",
+     "ורוזן",
+     "שרוזן",
+     "כרוזן",
+     "האוזען",
+     "לאוזען",
+     "באוזען",
+     "מאוזען",
+     "ואוזען",
+     "שאוזען",
+     "כאוזען",
+     "העוזן",
+     "לעוזן",
+     "בעוזן",
+     "מעוזן",
+     "ועוזן",
+     "שעוזן",
+     "כעוזן"
+    ],
+    "prefixed_latin_stem": [
+     "ה-Ozen",
+     "ל-Ozen",
+     "ב-Ozen",
+     "מ-Ozen",
+     "ו-Ozen",
+     "ש-Ozen",
+     "כ-Ozen"
+    ]
+   },
+   "notes": "The app itself. Live log 2026-08-08: 'רוזן' shipped as 'Rosen'.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:claude-code",
+   "class": "dev-transliteration",
+   "he": "קלודקוד",
+   "en": [
+    "Claude Code"
+   ],
+   "latin": "Claude Code",
+   "register": "dev",
+   "variants": [
+    "קלוד-קוד",
+    "קלאודקוד"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הקלודקוד",
+     "לקלודקוד",
+     "בקלודקוד",
+     "מקלודקוד",
+     "וקלודקוד",
+     "שקלודקוד",
+     "כקלודקוד",
+     "הקלוד-קוד",
+     "לקלוד-קוד",
+     "בקלוד-קוד",
+     "מקלוד-קוד",
+     "וקלוד-קוד",
+     "שקלוד-קוד",
+     "כקלוד-קוד",
+     "הקלאודקוד",
+     "לקלאודקוד",
+     "בקלאודקוד",
+     "מקלאודקוד",
+     "וקלאודקוד",
+     "שקלאודקוד",
+     "כקלאודקוד"
+    ],
+    "prefixed_latin_stem": [
+     "ה-Claude Code",
+     "ל-Claude Code",
+     "ב-Claude Code",
+     "מ-Claude Code",
+     "ו-Claude Code",
+     "ש-Claude Code",
+     "כ-Claude Code"
+    ]
+   },
+   "notes": "The agent he dictates into all day.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:claude",
+   "class": "dev-transliteration",
+   "he": "קלוד",
+   "en": [
+    "Claude"
+   ],
+   "latin": "Claude",
+   "register": "dev",
+   "variants": [
+    "קלאוד"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הקלוד",
+     "לקלוד",
+     "בקלוד",
+     "מקלוד",
+     "וקלוד",
+     "שקלוד",
+     "כקלוד",
+     "הקלאוד",
+     "לקלאוד",
+     "בקלאוד",
+     "מקלאוד",
+     "וקלאוד",
+     "שקלאוד",
+     "כקלאוד"
+    ],
+    "prefixed_latin_stem": [
+     "ה-Claude",
+     "ל-Claude",
+     "ב-Claude",
+     "מ-Claude",
+     "ו-Claude",
+     "ש-Claude",
+     "כ-Claude"
+    ]
+   },
+   "notes": "Said alone far more often than the full product name.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:coluanos",
+   "class": "dev-transliteration",
+   "he": "קולואנוס",
+   "en": [
+    "ColuanOS"
+   ],
+   "latin": "ColuanOS",
+   "register": "dev",
+   "variants": [
+    "קולונוס",
+    "קלואנוס"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הקולואנוס",
+     "לקולואנוס",
+     "בקולואנוס",
+     "מקולואנוס",
+     "וקולואנוס",
+     "שקולואנוס",
+     "כקולואנוס",
+     "הקולונוס",
+     "לקולונוס",
+     "בקולונוס",
+     "מקולונוס",
+     "וקולונוס",
+     "שקולונוס",
+     "כקולונוס",
+     "הקלואנוס",
+     "לקלואנוס",
+     "בקלואנוס",
+     "מקלואנוס",
+     "וקלואנוס",
+     "שקלואנוס",
+     "כקלואנוס"
+    ],
+    "prefixed_latin_stem": [
+     "ה-ColuanOS",
+     "ל-ColuanOS",
+     "ב-ColuanOS",
+     "מ-ColuanOS",
+     "ו-ColuanOS",
+     "ש-ColuanOS",
+     "כ-ColuanOS"
+    ]
+   },
+   "notes": "His agent OS project.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:mind2t",
+   "class": "dev-transliteration",
+   "he": "מיינדטוטי",
+   "en": [
+    "Mind2t"
+   ],
+   "latin": "Mind2t",
+   "register": "dev",
+   "variants": [
+    "מיינד2טי",
+    "מיינדטו"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "המיינדטוטי",
+     "למיינדטוטי",
+     "במיינדטוטי",
+     "ממיינדטוטי",
+     "ומיינדטוטי",
+     "שמיינדטוטי",
+     "כמיינדטוטי",
+     "המיינד2טי",
+     "למיינד2טי",
+     "במיינד2טי",
+     "ממיינד2טי",
+     "ומיינד2טי",
+     "שמיינד2טי",
+     "כמיינד2טי",
+     "המיינדטו",
+     "למיינדטו",
+     "במיינדטו",
+     "ממיינדטו",
+     "ומיינדטו",
+     "שמיינדטו",
+     "כמיינדטו"
+    ],
+    "prefixed_latin_stem": [
+     "ה-Mind2t",
+     "ל-Mind2t",
+     "ב-Mind2t",
+     "מ-Mind2t",
+     "ו-Mind2t",
+     "ש-Mind2t",
+     "כ-Mind2t"
+    ]
+   },
+   "notes": "His terminal/agent workbench.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:tauri",
+   "class": "dev-transliteration",
+   "he": "טאורי",
+   "en": [
+    "Tauri"
+   ],
+   "latin": "Tauri",
+   "register": "dev",
+   "variants": [
+    "טאורי",
+    "טאורים"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הטאורי",
+     "לטאורי",
+     "בטאורי",
+     "מטאורי",
+     "וטאורי",
+     "שטאורי",
+     "כטאורי",
+     "הטאורי",
+     "לטאורי",
+     "בטאורי",
+     "מטאורי",
+     "וטאורי",
+     "שטאורי",
+     "כטאורי",
+     "הטאורים",
+     "לטאורים",
+     "בטאורים",
+     "מטאורים",
+     "וטאורים",
+     "שטאורים",
+     "כטאורים"
+    ],
+    "prefixed_latin_stem": [
+     "ה-Tauri",
+     "ל-Tauri",
+     "ב-Tauri",
+     "מ-Tauri",
+     "ו-Tauri",
+     "ש-Tauri",
+     "כ-Tauri"
+    ]
+   },
+   "notes": "Desktop framework used by Ozen itself.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:ollama",
+   "class": "dev-transliteration",
+   "he": "אולמה",
+   "en": [
+    "Ollama"
+   ],
+   "latin": "Ollama",
+   "register": "dev",
+   "variants": [
+    "אולמה",
+    "עולמה",
+    "אולאמה"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "האולמה",
+     "לאולמה",
+     "באולמה",
+     "מאולמה",
+     "ואולמה",
+     "שאולמה",
+     "כאולמה",
+     "האולמה",
+     "לאולמה",
+     "באולמה",
+     "מאולמה",
+     "ואולמה",
+     "שאולמה",
+     "כאולמה",
+     "העולמה",
+     "לעולמה",
+     "בעולמה",
+     "מעולמה",
+     "ועולמה",
+     "שעולמה",
+     "כעולמה",
+     "האולאמה",
+     "לאולאמה",
+     "באולאמה",
+     "מאולאמה",
+     "ואולאמה",
+     "שאולאמה",
+     "כאולאמה"
+    ],
+    "prefixed_latin_stem": [
+     "ה-Ollama",
+     "ל-Ollama",
+     "ב-Ollama",
+     "מ-Ollama",
+     "ו-Ollama",
+     "ש-Ollama",
+     "כ-Ollama"
+    ]
+   },
+   "notes": "Local model runtime behind the translator.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:whisper",
+   "class": "dev-transliteration",
+   "he": "ויספר",
+   "en": [
+    "Whisper"
+   ],
+   "latin": "Whisper",
+   "register": "dev",
+   "variants": [
+    "ויספר",
+    "וויספר",
+    "וויסper"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הויספר",
+     "לויספר",
+     "בויספר",
+     "מויספר",
+     "וויספר",
+     "שויספר",
+     "כויספר",
+     "הויספר",
+     "לויספר",
+     "בויספר",
+     "מויספר",
+     "וויספר",
+     "שויספר",
+     "כויספר",
+     "הוויספר",
+     "לוויספר",
+     "בוויספר",
+     "מוויספר",
+     "ווויספר",
+     "שוויספר",
+     "כוויספר",
+     "הוויסper",
+     "לוויסper",
+     "בוויסper",
+     "מוויסper",
+     "ווויסper",
+     "שוויסper",
+     "כוויסper"
+    ],
+    "prefixed_latin_stem": [
+     "ה-Whisper",
+     "ל-Whisper",
+     "ב-Whisper",
+     "מ-Whisper",
+     "ו-Whisper",
+     "ש-Whisper",
+     "כ-Whisper"
+    ]
+   },
+   "notes": "The ASR model.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:dictalm",
+   "class": "dev-transliteration",
+   "he": "דיקטהלם",
+   "en": [
+    "DictaLM"
+   ],
+   "latin": "DictaLM",
+   "register": "dev",
+   "variants": [
+    "דיקטהלם",
+    "דיקטה אל אם",
+    "דיקטלם"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הדיקטהלם",
+     "לדיקטהלם",
+     "בדיקטהלם",
+     "מדיקטהלם",
+     "ודיקטהלם",
+     "שדיקטהלם",
+     "כדיקטהלם",
+     "הדיקטהלם",
+     "לדיקטהלם",
+     "בדיקטהלם",
+     "מדיקטהלם",
+     "ודיקטהלם",
+     "שדיקטהלם",
+     "כדיקטהלם",
+     "הדיקטלם",
+     "לדיקטלם",
+     "בדיקטלם",
+     "מדיקטלם",
+     "ודיקטלם",
+     "שדיקטלם",
+     "כדיקטלם"
+    ],
+    "prefixed_latin_stem": [
+     "ה-DictaLM",
+     "ל-DictaLM",
+     "ב-DictaLM",
+     "מ-DictaLM",
+     "ו-DictaLM",
+     "ש-DictaLM",
+     "כ-DictaLM"
+    ]
+   },
+   "notes": "The Hebrew translator model.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:orb",
+   "class": "dev-transliteration",
+   "he": "אורב",
+   "en": [
+    "orb"
+   ],
+   "latin": "orb",
+   "register": "dev",
+   "variants": [
+    "האורב",
+    "אורב"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "האורב",
+     "לאורב",
+     "באורב",
+     "מאורב",
+     "ואורב",
+     "שאורב",
+     "כאורב",
+     "ההאורב",
+     "להאורב",
+     "בהאורב",
+     "מהאורב",
+     "והאורב",
+     "שהאורב",
+     "כהאורב",
+     "האורב",
+     "לאורב",
+     "באורב",
+     "מאורב",
+     "ואורב",
+     "שאורב",
+     "כאורב"
+    ],
+    "prefixed_latin_stem": [
+     "ה-orb",
+     "ל-orb",
+     "ב-orb",
+     "מ-orb",
+     "ו-orb",
+     "ש-orb",
+     "כ-orb"
+    ]
+   },
+   "notes": "The floating window - his own word for it.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:fireball",
+   "class": "dev-transliteration",
+   "he": "פיירבול",
+   "en": [
+    "fireball"
+   ],
+   "latin": "fireball",
+   "register": "dev",
+   "variants": [
+    "פיירבול",
+    "פייארבול"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הפיירבול",
+     "לפיירבול",
+     "בפיירבול",
+     "מפיירבול",
+     "ופיירבול",
+     "שפיירבול",
+     "כפיירבול",
+     "הפיירבול",
+     "לפיירבול",
+     "בפיירבול",
+     "מפיירבול",
+     "ופיירבול",
+     "שפיירבול",
+     "כפיירבול",
+     "הפייארבול",
+     "לפייארבול",
+     "בפייארבול",
+     "מפייארבול",
+     "ופייארבול",
+     "שפייארבול",
+     "כפייארבול"
+    ],
+    "prefixed_latin_stem": [
+     "ה-fireball",
+     "ל-fireball",
+     "ב-fireball",
+     "מ-fireball",
+     "ו-fireball",
+     "ש-fireball",
+     "כ-fireball"
+    ]
+   },
+   "notes": "Gold set 2026-08-08: shipped as 'firewall'.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:reload",
+   "class": "dev-transliteration",
+   "he": "רילוד",
+   "en": [
+    "reload"
+   ],
+   "latin": "reload",
+   "register": "dev",
+   "variants": [
+    "רלוד",
+    "רילורד",
+    "רילואד"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הרילוד",
+     "לרילוד",
+     "ברילוד",
+     "מרילוד",
+     "ורילוד",
+     "שרילוד",
+     "כרילוד",
+     "הרלוד",
+     "לרלוד",
+     "ברלוד",
+     "מרלוד",
+     "ורלוד",
+     "שרלוד",
+     "כרלוד",
+     "הרילורד",
+     "לרילורד",
+     "ברילורד",
+     "מרילורד",
+     "ורילורד",
+     "שרילורד",
+     "כרילורד",
+     "הרילואד",
+     "לרילואד",
+     "ברילואד",
+     "מרילואד",
+     "ורילואד",
+     "שרילואד",
+     "כרילואד"
+    ],
+    "prefixed_latin_stem": [
+     "ה-reload",
+     "ל-reload",
+     "ב-reload",
+     "מ-reload",
+     "ו-reload",
+     "ש-reload",
+     "כ-reload"
+    ]
+   },
+   "notes": "Gold set 2026-08-08: 'רילורד' shipped as 'reroll'.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:extension",
+   "class": "dev-transliteration",
+   "he": "אקסטנשן",
+   "en": [
+    "extension"
+   ],
+   "latin": "extension",
+   "register": "dev",
+   "variants": [
+    "אקסטינשן",
+    "אקסטנשיין"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "האקסטנשן",
+     "לאקסטנשן",
+     "באקסטנשן",
+     "מאקסטנשן",
+     "ואקסטנשן",
+     "שאקסטנשן",
+     "כאקסטנשן",
+     "האקסטינשן",
+     "לאקסטינשן",
+     "באקסטינשן",
+     "מאקסטינשן",
+     "ואקסטינשן",
+     "שאקסטינשן",
+     "כאקסטינשן",
+     "האקסטנשיין",
+     "לאקסטנשיין",
+     "באקסטנשיין",
+     "מאקסטנשיין",
+     "ואקסטנשיין",
+     "שאקסטנשיין",
+     "כאקסטנשיין"
+    ],
+    "prefixed_latin_stem": [
+     "ה-extension",
+     "ל-extension",
+     "ב-extension",
+     "מ-extension",
+     "ו-extension",
+     "ש-extension",
+     "כ-extension"
+    ]
+   },
+   "notes": "Browser extension - recurs in his log.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:defect",
+   "class": "dev-transliteration",
+   "he": "דפקט",
+   "en": [
+    "defect"
+   ],
+   "latin": "defect",
+   "register": "dev",
+   "variants": [
+    "דפקטים",
+    "דיפקט"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הדפקט",
+     "לדפקט",
+     "בדפקט",
+     "מדפקט",
+     "ודפקט",
+     "שדפקט",
+     "כדפקט",
+     "הדפקטים",
+     "לדפקטים",
+     "בדפקטים",
+     "מדפקטים",
+     "ודפקטים",
+     "שדפקטים",
+     "כדפקטים",
+     "הדיפקט",
+     "לדיפקט",
+     "בדיפקט",
+     "מדיפקט",
+     "ודיפקט",
+     "שדיפקט",
+     "כדיפקט"
+    ],
+    "prefixed_latin_stem": [
+     "ה-defect",
+     "ל-defect",
+     "ב-defect",
+     "מ-defect",
+     "ו-defect",
+     "ש-defect",
+     "כ-defect"
+    ]
+   },
+   "notes": "His standing word for a bug; he uses it constantly.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:responsive",
+   "class": "dev-transliteration",
+   "he": "ריספונסיבי",
+   "en": [
+    "responsive"
+   ],
+   "latin": "responsive",
+   "register": "dev",
+   "variants": [
+    "רספונסיבי",
+    "ריספונסיב"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הריספונסיבי",
+     "לריספונסיבי",
+     "בריספונסיבי",
+     "מריספונסיבי",
+     "וריספונסיבי",
+     "שריספונסיבי",
+     "כריספונסיבי",
+     "הרספונסיבי",
+     "לרספונסיבי",
+     "ברספונסיבי",
+     "מרספונסיבי",
+     "ורספונסיבי",
+     "שרספונסיבי",
+     "כרספונסיבי",
+     "הריספונסיב",
+     "לריספונסיב",
+     "בריספונסיב",
+     "מריספונסיב",
+     "וריספונסיב",
+     "שריספונסיב",
+     "כריספונסיב"
+    ],
+    "prefixed_latin_stem": [
+     "ה-responsive",
+     "ל-responsive",
+     "ב-responsive",
+     "מ-responsive",
+     "ו-responsive",
+     "ש-responsive",
+     "כ-responsive"
+    ]
+   },
+   "notes": "UI vocabulary from his log.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
+  },
+  {
+   "id": "name:fanout",
+   "class": "dev-transliteration",
+   "he": "פאנאאוט",
+   "en": [
+    "fanout"
+   ],
+   "latin": "fanout",
+   "register": "dev",
+   "variants": [
+    "אפרוץ",
+    "פאנאאוט"
+   ],
+   "forms": {
+    "prefixed_hebrew_script": [
+     "הפאנאאוט",
+     "לפאנאאוט",
+     "בפאנאאוט",
+     "מפאנאאוט",
+     "ופאנאאוט",
+     "שפאנאאוט",
+     "כפאנאאוט",
+     "האפרוץ",
+     "לאפרוץ",
+     "באפרוץ",
+     "מאפרוץ",
+     "ואפרוץ",
+     "שאפרוץ",
+     "כאפרוץ",
+     "הפאנאאוט",
+     "לפאנאאוט",
+     "בפאנאאוט",
+     "מפאנאאוט",
+     "ופאנאאוט",
+     "שפאנאאוט",
+     "כפאנאאוט"
+    ],
+    "prefixed_latin_stem": [
+     "ה-fanout",
+     "ל-fanout",
+     "ב-fanout",
+     "מ-fanout",
+     "ו-fanout",
+     "ש-fanout",
+     "כ-fanout"
+    ]
+   },
+   "notes": "Gold set 2026-08-08: 'האפרוץ' shipped as 'break-in'.",
+   "source": "ozen live log + gold-set oracle, 2026-08-08 (Asia/Jerusalem)"
   }
  ]
 }

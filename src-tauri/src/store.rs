@@ -104,6 +104,18 @@ pub struct LogEntry {
     /// there would be no way to tell whether it is earning its keep or just costing tokens.
     pub hints_used: usize,
     pub auto_fixed: usize,
+    /// Set on an entry when the SPEAKER SAID ROUGHLY THE SAME THING AGAIN shortly afterwards.
+    ///
+    /// This is the only negative label the app can collect without asking for one. The correction
+    /// queue has produced 5 labels in 267 utterances, and the Accessibility route that would watch
+    /// him edit the pasted text is unavailable because he dictates into a terminal, which exposes
+    /// no editable text. Repeating yourself, however, is observable from inside the app and costs
+    /// him nothing.
+    ///
+    /// It is a CANDIDATE, never a verdict: repeating a sentence can also mean he added a thought.
+    /// Nothing acts on this field at runtime; the night pass weighs it against a strong model's
+    /// opinion before anything is learned from it.
+    pub redictated: bool,
 }
 
 impl Default for LogEntry {
@@ -121,6 +133,7 @@ impl Default for LogEntry {
             confidence: 0.0,
             hints_used: 0,
             auto_fixed: 0,
+            redictated: false,
         }
     }
 }
@@ -185,6 +198,31 @@ pub struct Mishearing {
     /// but correct word is worse than leaving a wrong one.
     pub locked: bool,
     pub last_at: u64,
+}
+
+/// What `scripts/night-pass.py` leaves behind for the app to pick up. Deliberately a plain data
+/// file rather than a second writer of `dictionary.json`: the app owns that file and writes it
+/// whole, so an outside process editing it would silently lose whatever the app held in memory.
+#[derive(Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct Proposals {
+    pub exemplars: Vec<ProposedExemplar>,
+    pub mishearings: Vec<ProposedMishearing>,
+    pub summary: String,
+}
+
+#[derive(Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct ProposedExemplar {
+    pub hebrew: String,
+    pub english: String,
+}
+
+#[derive(Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct ProposedMishearing {
+    pub heard: String,
+    pub meant: String,
 }
 
 impl Default for Mishearing {
@@ -315,6 +353,14 @@ impl Store {
 
     pub fn append_log(&self, entry: LogEntry) {
         if let Ok(mut log) = self.log.lock() {
+            // Before the new entry lands, ask whether it is a REPEAT of the one before it. If it
+            // is, the previous paste is the thing he was not satisfied with - a free negative
+            // label, collected without a queue, a hotkey, or a single keystroke from him.
+            if let Some(prev) = log.last_mut() {
+                if is_redictation(prev, &entry) {
+                    prev.redictated = true;
+                }
+            }
             log.push(entry);
             let overflow = log.len().saturating_sub(LOG_CAP);
             if overflow > 0 {
@@ -383,6 +429,81 @@ impl Store {
         self.learn_mishearings(&produced, corrected);
         self.note_vocab(corrected);
         true
+    }
+
+    /// Apply whatever the night pass proposed, once, at startup.
+    ///
+    /// THE AUTHORITY SPLIT IS THE WHOLE DESIGN. Orel's own correction is ground truth: it locks a
+    /// mishearing, feeds the aligner, and can force a rendering forever. A grader's opinion - even
+    /// a strong model's, even when it is right - is EVIDENCE, and it enters at the weakest useful
+    /// level:
+    ///   - exemplars are added, because an exemplar is retrieved only for similar input and the
+    ///     model is free to disregard it;
+    ///   - mishearings are added UNLOCKED, so they are offered to the model as "maybe" and never
+    ///     silently rewrite his words (`hint_block` in translate.rs draws that line);
+    ///   - the aligner is NOT fed, because promotion produces a FORCED rendering and nothing
+    ///     machine-generated has earned that;
+    ///   - `corrected` on the log entry is NOT set, because that field means "Orel said so" and
+    ///     overwriting it would destroy the only clean supervision signal the app has.
+    ///
+    /// Idempotent by archiving the file it consumed: a second startup finds nothing to do.
+    pub fn ingest_proposals(&self) -> Option<String> {
+        let path = self.dir.join("night-proposals.json");
+        let raw = std::fs::read_to_string(&path).ok()?;
+        let doc: Proposals = match serde_json::from_str(&raw) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("[store] night-proposals.json unreadable ({e}); ignoring");
+                let _ = std::fs::rename(&path, path.with_extension("json.bad"));
+                return None;
+            }
+        };
+
+        for x in &doc.exemplars {
+            if !x.hebrew.trim().is_empty() && !x.english.trim().is_empty() {
+                self.add_exemplar(&x.hebrew, &x.english);
+            }
+        }
+
+        if let Ok(mut dict) = self.dict.lock() {
+            for m in &doc.mishearings {
+                if m.heard.chars().count() < crate::phonetics::MIN_LEN || m.heard == m.meant {
+                    continue;
+                }
+                // A rule Orel confirmed outranks anything proposed here - never downgrade it.
+                if let Some(existing) = dict.mishearings.iter_mut().find(|e| e.heard == m.heard) {
+                    if !existing.locked {
+                        existing.meant = m.meant.clone();
+                        existing.hits += 1;
+                        existing.last_at = now_ms();
+                    }
+                } else {
+                    dict.mishearings.push(Mishearing {
+                        heard: m.heard.clone(),
+                        meant: m.meant.clone(),
+                        hits: 1,
+                        locked: false,
+                        last_at: now_ms(),
+                    });
+                }
+            }
+            write_json(&self.dir.join("dictionary.json"), &*dict);
+        }
+
+        let stamp = now_ms();
+        let _ = std::fs::rename(&path, self.dir.join(format!("night-proposals-{stamp}.applied.json")));
+        Some(doc.summary)
+    }
+
+    /// The one-line verdict from the last night pass, for the dashboard. Read from disk each time
+    /// rather than cached: the pass runs in a separate process while the app is up, so a value
+    /// held in memory would be stale exactly when it is interesting.
+    pub fn night_summary(&self) -> String {
+        std::fs::read_to_string(self.dir.join("night-pass-state.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|v| v.get("summary").and_then(|s| s.as_str()).map(str::to_string))
+            .unwrap_or_default()
     }
 
     // ---- the automated dictionary ----
@@ -681,8 +802,26 @@ fn is_common_speech(he: &str, dict: &Dictionary, total: f32) -> bool {
 /// EXCEPTION, and it is the reason this is not a blunt prefix test: real terms DO begin with
 /// those letters (`טרמינל` does not, but `למבדה`/lambda does, and ל is also the preposition "to"
 /// glued onto a borrowed noun). So a token is spared when the lexicon knows it as a term.
+/// SUBORDINATING CLITICS, added 2026-08-08 on measured evidence. The gate above held the
+/// dictionary at 7 terms for a day and then it re-grew to 33, with `שנוכל -> install` among them.
+/// `שנוכל` is "so that we can" - a conjugated verb wearing a ש prefix, which the bare
+/// first-letter test cannot see because it only ever looks at position 0. Hebrew glues ש (that),
+/// כש (when) and ו (and) onto the front of an already-conjugated verb, so the verbal marker moves
+/// one or two characters right. Peel the clitic, then apply the same morphology test underneath.
 fn looks_verbal(he: &str) -> bool {
     let ch: Vec<char> = he.chars().collect();
+    if ch.len() >= 5 && ch[0] == 'כ' && ch[1] == 'ש' && is_verb_stem(&ch[2..]) {
+        return true;
+    }
+    if ch.len() >= 4 && (ch[0] == 'ש' || ch[0] == 'ו') && is_verb_stem(&ch[1..]) {
+        return true;
+    }
+    is_verb_stem(&ch)
+}
+
+/// The morphology test proper, on a clitic-free stem. Hebrew marks its verbs at the FRONT: an
+/// infinitive opens with ל, and the prefix conjugation opens with א/ת/י/נ.
+fn is_verb_stem(ch: &[char]) -> bool {
     if ch.len() < 4 {
         return false;
     }
@@ -717,11 +856,25 @@ const EN_GRAMMAR: &[&str] = &[
     "give", "go", "had", "has", "have", "is", "keep", "know", "let", "look", "looks", "make",
     "made", "need", "open", "put", "said", "say", "see", "seen", "should", "take", "tell", "think",
     "use", "used", "want", "was", "were", "will", "would", "write", "wrote", "okay", "great",
+    // Added 2026-08-08 from the second re-growth (7 -> 33 terms in two days). Every one of these
+    // was promoted as "terminology" and every one is ordinary vocabulary the translator already
+    // renders correctly unaided - so the hint bought nothing and cost prompt tokens on the way in.
+    "leave", "left", "first", "new", "less", "together", "meaning", "according", "sent", "send",
+    "start", "stop", "close", "finish", "change", "move", "add", "remove", "try", "wait", "check",
+    "work", "works", "worked", "sure", "better", "best", "big", "small", "fast", "slow",
 ];
+
+/// An -ly adverb is never terminology. This is the general form of half the stoplist above and it
+/// costs nothing: `automatically`, `realistically`, `basically` are things the model already knows,
+/// and forcing a rendering for them can only make output worse.
+fn is_adverb(en: &str) -> bool {
+    let w = en.trim().to_lowercase();
+    w.len() > 4 && w.ends_with("ly") && !w.contains(' ')
+}
 
 fn is_english_grammar(en: &str) -> bool {
     let w = en.trim().to_lowercase();
-    !w.contains(' ') && EN_GRAMMAR.contains(&w.as_str())
+    (!w.contains(' ') && EN_GRAMMAR.contains(&w.as_str())) || is_adverb(&w)
 }
 
 fn promote(dict: &mut Dictionary) {
@@ -978,6 +1131,47 @@ fn content_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// How long after a paste a repeat still counts as a repeat OF that paste. Three minutes: long
+/// enough to read the bad English, swear, and say it again; short enough that the next unrelated
+/// thought on the same subject has moved on.
+const REDICTATION_WINDOW_MS: u64 = 180_000;
+
+/// Token overlap above which two utterances are "the same thing again".
+///
+/// MEASURED, and the measurement demoted this whole feature. Replayed over his own 274-entry log
+/// on 2026-08-08: of 200 eligible consecutive pairs, exactly ONE fires - and it fires identically
+/// at every threshold from 0.3 to 0.7, because the single real repeat scores 1.0 and nothing else
+/// scores above 0.3. So this speaker does not re-dictate when the output is wrong; he takes the
+/// bad paste and moves on.
+///
+/// It stays because it costs nothing and a free label is still a free label, but it is a BONUS
+/// signal, not a source. The mechanism that actually improves the translator without his labour
+/// is the night pass, which uses a strong model as its oracle and needs no human verdict at all.
+/// 0.5 is kept because the choice is insensitive: every threshold in that range gives one fire.
+const REDICTATION_MIN_OVERLAP: f32 = 0.5;
+
+/// Did the speaker just say the same thing again? The signal is deliberately conservative in both
+/// directions - a missed repeat costs one unused label, a false repeat teaches the system that a
+/// GOOD translation was rejected, which is strictly worse.
+fn is_redictation(prev: &LogEntry, next: &LogEntry) -> bool {
+    if next.at.saturating_sub(prev.at) > REDICTATION_WINDOW_MS {
+        return false;
+    }
+    // A repeat is a repeat of the same KIND of pass; a polish following a translate is a mode
+    // change, not a complaint.
+    if prev.mode != next.mode {
+        return false;
+    }
+    let a = content_tokens(&prev.hebrew);
+    let b = content_tokens(&next.hebrew);
+    // Very short utterances share tokens by accident ("okay", "yes, do it"), so the overlap
+    // measure carries no information there.
+    if a.len() < 3 || b.len() < 3 {
+        return false;
+    }
+    overlap(&a, &b) >= REDICTATION_MIN_OVERLAP
+}
+
 /// Jaccard overlap between two token sets - cheap fuzzy match for translation-memory recall.
 fn overlap(a: &[String], b: &[String]) -> f32 {
     if a.is_empty() || b.is_empty() {
@@ -1030,6 +1224,95 @@ mod tests {
     fn store() -> Store {
         let dir = std::env::temp_dir().join(format!("orellius-stt-test-{}", now_ms()));
         Store::load(dir)
+    }
+
+    /// The authority split, tested where it actually matters: a night-pass proposal must be able
+    /// to add knowledge and must NOT be able to overrule Orel. A grader that could silently
+    /// downgrade a locked rule would quietly undo the only supervision this app has.
+    #[test]
+    fn night_proposals_add_evidence_but_never_outrank_him() {
+        let s = store();
+        // A rule he confirmed by correcting it.
+        s.learn_mishearings("comic push the branch", "commit push the branch");
+        let locked_before = s.mishearings().into_iter().find(|m| m.heard == "comic");
+        assert!(locked_before.as_ref().is_some_and(|m| m.locked), "his correction should lock");
+
+        std::fs::write(
+            s.dir.join("night-proposals.json"),
+            r#"{"summary":"test pass","exemplars":[{"hebrew":"תעשה קומיט","english":"Make a commit."}],
+                "mishearings":[{"heard":"comic","meant":"comedy"},{"heard":"flutz","meant":"plot"}]}"#,
+        )
+        .unwrap();
+
+        let summary = s.ingest_proposals().expect("proposals should be ingested");
+        assert_eq!(summary, "test pass");
+
+        let after = s.mishearings();
+        let comic = after.iter().find(|m| m.heard == "comic").expect("locked rule survives");
+        assert_eq!(comic.meant, "commit", "a proposal must not overwrite his locked rule");
+        let flutz = after.iter().find(|m| m.heard == "flutz").expect("new rule added");
+        assert!(!flutz.locked, "machine-proposed rules are offered, never applied silently");
+
+        // Consumed exactly once: a second startup must not re-apply the same file.
+        assert!(s.ingest_proposals().is_none(), "the proposals file should be archived");
+    }
+
+    /// The one real repeat in his log, and the neighbouring pair that must NOT fire. Both are
+    /// lifted from live data, because a similarity threshold defended by an invented percentage is
+    /// how the previous version of this comment was wrong.
+    #[test]
+    fn a_repeat_is_flagged_and_a_follow_up_thought_is_not() {
+        let e = |at: u64, he: &str| LogEntry {
+            at,
+            hebrew: he.to_string(),
+            mode: "translate".to_string(),
+            ..Default::default()
+        };
+        let first = e(1_000, "תחשב את זה בזמן שלך, לא בזמן של בני אדם.");
+        let again = e(20_000, "תחשב את זה בזמן שלך, לא של בני אדם.");
+        assert!(is_redictation(&first, &again), "the same sentence again must flag");
+
+        // Same topic, different thought - the case a looser bar would wrongly punish.
+        let a = e(1_000, "תוסיף אפקט לכסף שהם מרוויחים בתוך המשחק");
+        let b = e(20_000, "בנוסף לזה אני רוצה שיהיה עוד currency מחוץ לסשן");
+        assert!(!is_redictation(&a, &b), "a follow-up thought is not a complaint");
+
+        // Outside the window, the same words are a new request, not a repeat.
+        let late = e(1_000 + REDICTATION_WINDOW_MS + 1, "תחשב את זה בזמן שלך, לא של בני אדם.");
+        assert!(!is_redictation(&first, &late), "past the window it is a new request");
+    }
+
+    /// The gate is only worth anything if it can be SEEN to reject the exact pairs that got past
+    /// it. These six are lifted verbatim from the live dictionary on 2026-08-08, after it re-grew
+    /// from 7 terms to 33 in two days. A gate proven only by "nothing bad appeared" is a gate
+    /// nobody has watched fire (SCAR-004).
+    #[test]
+    fn the_gate_rejects_the_pairs_that_actually_got_through() {
+        // Hebrew side: a conjugated verb hiding behind a subordinating clitic.
+        assert!(looks_verbal("שנוכל"), "so-that-we-can is a verb wearing a ש");
+        assert!(looks_verbal("שתעשה"));
+        assert!(looks_verbal("כשנראה"));
+        assert!(looks_verbal("ותגיד"));
+        // English side: ordinary vocabulary the translator already knows unaided.
+        for en in ["leave", "first", "left", "new", "less", "together", "meaning", "according"] {
+            assert!(is_english_grammar(en), "{en} should be blocked as ordinary vocabulary");
+        }
+        assert!(is_english_grammar("automatically"), "-ly adverbs are never terminology");
+        assert!(is_english_grammar("realistically"));
+    }
+
+    /// The other direction, and the one that matters more: real terminology must still pass. A
+    /// filter that blocks everything is not a fix, it is a broken dictionary with a clean log.
+    #[test]
+    fn the_gate_still_admits_real_terminology() {
+        for he in ["טרמינל", "קפיברה", "המוקאפ", "רובלוקס", "הכסף", "קומיט"] {
+            assert!(!looks_verbal(he), "{he} is a noun, not a verb");
+        }
+        for en in ["terminal", "capybara", "mockup", "roblox", "commit", "repo", "plot", "money"] {
+            assert!(!is_english_grammar(en), "{en} is terminology and must survive");
+        }
+        // A short word ending in -ly is a word, not an adverb: "fly", "only" is in the list anyway.
+        assert!(!is_adverb("fly"));
     }
 
     /// The bar must bite in both directions: one sighting teaches nothing, and a term that

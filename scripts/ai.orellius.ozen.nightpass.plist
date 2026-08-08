@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The night pass, scheduled. NOT INSTALLED - wiring a LaunchAgent is a contract change and is
+  Orel's call, never bundled silently into feature work.
+
+  To install:
+      cp scripts/ai.orellius.ozen.nightpass.plist ~/Library/LaunchAgents/
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.orellius.ozen.nightpass.plist
+  To remove:
+      launchctl bootout gui/$(id -u)/ai.orellius.ozen.nightpass
+      rm ~/Library/LaunchAgents/ai.orellius.ozen.nightpass.plist
+  To run once by hand, which needs no installation at all:
+      python3 ~/Desktop/Studio/tools/ozen/scripts/night-pass.py
+
+  05:00 is deliberate: it is after he has stopped for the night on the pattern in his own log, and
+  the pass only reads log.json and writes a proposals file, so it cannot disturb a running app. The
+  app picks the proposals up at its next startup.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.orellius.ozen.nightpass</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/orelohayon/Desktop/Studio/tools/ozen/scripts/night-pass.py</string>
+        <string>--limit</string>
+        <string>80</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>5</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+
+    <!-- Never wake the machine for this; a missed night simply means a bigger batch tomorrow. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/orelohayon/Library/Application Support/ai.orellius.ozen/night-pass.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/orelohayon/Library/Application Support/ai.orellius.ozen/night-pass.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd hands a minimal PATH; the Claude CLI lives in ~/.local/bin. -->
+        <key>PATH</key>
+        <string>/Users/orelohayon/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
