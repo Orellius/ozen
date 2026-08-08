@@ -26,3 +26,8 @@ dist-ssr
 # Python bytecode from the eval scripts
 __pycache__/
 *.pyc
+
+# Internal working notes for coding agents. Untracked on purpose: it is
+# operator-facing reasoning, machine paths and hardware detail, not project
+# documentation. README.md is what the project is.
+CLAUDE.md
