@@ -31,3 +31,7 @@ __pycache__/
 # operator-facing reasoning, machine paths and hardware detail, not project
 # documentation. README.md is what the project is.
 CLAUDE.md
+
+# Evaluation corpus and Hebrew research notes. Untracked on purpose: docs/eval/
+# holds real dictated sentences - the operator own speech, not test fixtures.
+docs/
