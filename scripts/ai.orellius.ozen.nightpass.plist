@@ -10,15 +10,23 @@
   ~/.ozen/ is the copy launchd is permitted to read. RE-DEPLOY THAT COPY after every change to
   scripts/night-pass.py, or the nightly job quietly keeps running the old one.
 
+  EVERY __HOME__ AND __USER__ BELOW MUST BE SUBSTITUTED BEFORE INSTALLING. launchd does not
+  expand ~, $HOME or any variable inside this file - a literal path is the only thing that
+  works, which is why this ships as a template rather than as a ready file. The sed line in
+  the install steps does the substitution; doing it by hand is equally fine, and forgetting
+  it entirely produces a job that loads and fails silently at 5am.
+
   To install (the first line is the deploy step, and it is not optional):
       mkdir -p ~/.ozen && cp scripts/night-pass.py ~/.ozen/night-pass.py
-      cp scripts/ai.orellius.ozen.nightpass.plist ~/Library/LaunchAgents/
+      sed -e "s|__HOME__|$HOME|g" -e "s|__USER__|$(id -un)|g" \
+          scripts/ai.orellius.ozen.nightpass.plist \
+          > ~/Library/LaunchAgents/ai.orellius.ozen.nightpass.plist
       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.orellius.ozen.nightpass.plist
   To remove:
       launchctl bootout gui/$(id -u)/ai.orellius.ozen.nightpass
       rm ~/Library/LaunchAgents/ai.orellius.ozen.nightpass.plist
   To run once by hand, which needs no installation at all:
-      python3 ~/Desktop/Studio/tools/ozen/scripts/night-pass.py
+      python3 scripts/night-pass.py
 
   05:00 is deliberate: it is after he has stopped for the night on the pattern in his own log, and
   the pass only reads log.json and writes a proposals file, so it cannot disturb a running app. The
@@ -32,7 +40,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>/Users/orelohayon/.ozen/night-pass.py</string>
+        <string>__HOME__/.ozen/night-pass.py</string>
         <string>--limit</string>
         <string>80</string>
     </array>
@@ -48,9 +56,9 @@
     <false/>
 
     <key>StandardOutPath</key>
-    <string>/Users/orelohayon/Library/Application Support/ai.orellius.ozen/night-pass.log</string>
+    <string>__HOME__/Library/Application Support/ai.orellius.ozen/night-pass.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/orelohayon/Library/Application Support/ai.orellius.ozen/night-pass.log</string>
+    <string>__HOME__/Library/Application Support/ai.orellius.ozen/night-pass.log</string>
 
     <!--
       MEASURED 2026-08-08, and this block is the difference between a pass that runs and one that
@@ -66,13 +74,13 @@
     <dict>
         <!-- launchd hands a minimal PATH; the Claude CLI lives in ~/.local/bin. -->
         <key>PATH</key>
-        <string>/Users/orelohayon/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
-        <string>/Users/orelohayon</string>
+        <string>__HOME__</string>
         <key>USER</key>
-        <string>orelohayon</string>
+        <string>__USER__</string>
         <key>LOGNAME</key>
-        <string>orelohayon</string>
+        <string>__USER__</string>
         <key>SHELL</key>
         <string>/bin/zsh</string>
         <key>LANG</key>
