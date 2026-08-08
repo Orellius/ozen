@@ -3,7 +3,15 @@
   The night pass, scheduled. NOT INSTALLED - wiring a LaunchAgent is a contract change and is
   Orel's call, never bundled silently into feature work.
 
-  To install:
+  IT CANNOT RUN THE SCRIPT OUT OF THE REPO. Measured 2026-08-08 by kickstarting it: the job fired
+  (runs = 1) and exited 2 with "Operation not permitted" reading the script. A launchd-spawned
+  process is disclaimed and holds no TCC grant for ~/Desktop, ~/Documents or ~/Downloads - this is
+  SCAR-006, and it is why the path above points at a DEPLOYED COPY. The repo stays source of truth;
+  ~/.ozen/ is the copy launchd is permitted to read. RE-DEPLOY THAT COPY after every change to
+  scripts/night-pass.py, or the nightly job quietly keeps running the old one.
+
+  To install (the first line is the deploy step, and it is not optional):
+      mkdir -p ~/.ozen && cp scripts/night-pass.py ~/.ozen/night-pass.py
       cp scripts/ai.orellius.ozen.nightpass.plist ~/Library/LaunchAgents/
       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.orellius.ozen.nightpass.plist
   To remove:
@@ -24,7 +32,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>/Users/orelohayon/Desktop/Studio/tools/ozen/scripts/night-pass.py</string>
+        <string>/Users/orelohayon/.ozen/night-pass.py</string>
         <string>--limit</string>
         <string>80</string>
     </array>

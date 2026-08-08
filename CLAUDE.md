@@ -74,6 +74,16 @@ mishearings (offered to the model as "maybe", never silently applied). The align
 the night pass, because promotion produces a forced rendering and nothing machine-generated has
 earned that. `night_proposals_add_evidence_but_never_outrank_him` pins this, mutant-verified.
 
+**THE NIGHTLY JOB CANNOT LIVE IN THIS REPO.** Measured 2026-08-08 by kickstarting it: the
+LaunchAgent fired (`runs = 1`) and exited **2** with `Operation not permitted` reading
+`scripts/night-pass.py`. A launchd-spawned process is disclaimed and holds no TCC grant for
+`~/Desktop` - SCAR-006. The plist therefore points at `~/.ozen/night-pass.py`, a deployed copy;
+this repo stays source of truth and the copy must be refreshed after every edit, or the nightly
+pass silently keeps running the old script. Three separate silent-failure modes have now been found
+in this one job - a missing `USER` in launchd's environment (the CLI reported "Credit balance is too
+low"), a `--since 0` watermark bug, and TCC - and **every one of them was only visible because the
+plist writes a log**. Never wire an unattended job without one.
+
 **Apple has no Hebrew, measured on this machine 2026-08-08** (`sw_vers` 26.5.1) - so none of this
 can lean on it. Translation framework: 38 languages, `he->en` returns `unsupported`.
 FoundationModels: available, 23 languages, no Hebrew. NLTagger: no lemma and no part-of-speech for
